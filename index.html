@@ -4,13 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GitHub Pages 记事本</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📝</text></svg>">
     <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
     <div class="container">
         <header>
             <h1>📝 我的记事本</h1>
             <div class="header-actions">
+                <button id="syncBtn" class="btn btn-secondary" title="从 GitHub 同步笔记">🔄 同步</button>
                 <button id="configBtn" class="btn btn-secondary">⚙️ 配置</button>
                 <button id="newNoteBtn" class="btn btn-primary">+ 新建笔记</button>
             </div>
@@ -22,7 +25,7 @@
             <div class="form-group">
                 <label for="githubToken">GitHub Personal Access Token:</label>
                 <input type="password" id="githubToken" placeholder="ghp_xxxxxxxxxxxx">
-                <small>需要 repo 权限，用于上传文件到 release</small>
+                <small>需要 repo 权限，用于管理仓库文件</small>
             </div>
             <div class="form-group">
                 <label for="githubRepo">仓库名称 (owner/repo):</label>
@@ -35,13 +38,14 @@
 
         <!-- 主内容区 -->
         <div class="main-content">
-            <!-- 侧边栏 - 笔记列表 -->
+            <!-- 侧边栏 - 目录树 -->
             <aside class="sidebar">
                 <div class="search-box">
                     <input type="text" id="searchInput" placeholder="🔍 搜索笔记...">
+                    <button id="refreshTreeBtn" class="btn-refresh" title="刷新目录树">🔄</button>
                 </div>
-                <div id="notesList" class="notes-list">
-                    <!-- 笔记列表将动态生成 -->
+                <div id="directoryTree" class="directory-tree">
+                    <!-- 目录树将动态生成 -->
                 </div>
             </aside>
 
@@ -53,8 +57,12 @@
 
                 <div id="editorContainer" class="editor-container hidden">
                     <div class="editor-header">
+                        <div class="note-path" id="notePath"></div>
                         <input type="text" id="noteTitle" placeholder="笔记标题" class="note-title-input">
                         <div class="editor-actions">
+                            <button id="viewModeBtn" class="btn btn-icon" title="切换编辑/预览模式">
+                                👁️ 预览
+                            </button>
                             <button id="uploadFileBtn" class="btn btn-icon" title="上传文件">
                                 📎 上传文件
                             </button>
@@ -65,12 +73,12 @@
                         </div>
                     </div>
                     <div class="editor-content">
-                        <div 
+                        <textarea 
                             id="noteContent" 
-                            contenteditable="true" 
-                            class="note-content"
-                            placeholder="开始输入...支持粘贴图片 (Ctrl+V)"
-                        ></div>
+                            class="note-content markdown-editor"
+                            placeholder="开始输入 Markdown 格式文本...支持粘贴图片 (Ctrl+V)"
+                        ></textarea>
+                        <div id="markdownPreview" class="markdown-preview hidden"></div>
                     </div>
                     <div class="editor-footer">
                         <div class="attachments-list" id="attachmentsList">
@@ -94,6 +102,44 @@
 
     <!-- 消息提示 -->
     <div id="messageToast" class="toast hidden"></div>
+
+    <!-- 新建文件夹对话框 -->
+    <div id="newFolderDialog" class="dialog hidden">
+        <div class="dialog-content">
+            <h3>新建文件夹</h3>
+            <div class="form-group">
+                <label for="folderName">文件夹名称:</label>
+                <input type="text" id="folderName" placeholder="输入文件夹名称">
+            </div>
+            <div class="form-group">
+                <label for="folderPath">父目录:</label>
+                <input type="text" id="folderPath" readonly placeholder="root">
+            </div>
+            <div class="dialog-actions">
+                <button id="cancelFolderBtn" class="btn btn-secondary">取消</button>
+                <button id="createFolderBtn" class="btn btn-primary">创建</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 新建笔记对话框 -->
+    <div id="newNoteDialog" class="dialog hidden">
+        <div class="dialog-content">
+            <h3>新建笔记</h3>
+            <div class="form-group">
+                <label for="newNoteName">笔记名称:</label>
+                <input type="text" id="newNoteName" placeholder="输入笔记名称（不含扩展名）">
+            </div>
+            <div class="form-group">
+                <label for="newNotePath">保存路径:</label>
+                <input type="text" id="newNotePath" placeholder="root (留空表示根目录)">
+            </div>
+            <div class="dialog-actions">
+                <button id="cancelNoteBtn" class="btn btn-secondary">取消</button>
+                <button id="createNoteBtn" class="btn btn-primary">创建</button>
+            </div>
+        </div>
+    </div>
 
     <script src="github-api.js"></script>
     <script src="app.js"></script>

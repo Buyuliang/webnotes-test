@@ -6,17 +6,103 @@ class NotesApp {
     constructor() {
         this.notes = [];
         this.currentNoteId = null;
+        this.currentNotePath = null; // 当前打开的笔记文件路径，null 表示新笔记未保存
+        this.tempParentPath = 'root'; // 临时保存新建笔记的父目录路径
+        this.pendingImages = []; // 待上传的图片列表（用于新笔记）
+        this.isPreviewMode = false;
+        this.autoSyncInterval = null;
+        this.syncInProgress = false;
         this.init();
     }
 
     /**
      * 初始化应用
      */
-    init() {
-        this.loadConfig();
-        this.loadNotes();
-        this.setupEventListeners();
-        this.renderNotesList();
+    async init() {
+        try {
+            // 1. 加载配置（可能失败：DOM 未加载、localStorage 不可用）
+            try {
+                this.loadConfig();
+            } catch (error) {
+                console.warn('加载配置失败:', error);
+                // 继续执行，不影响其他功能
+            }
+
+            // 2. 加载笔记（可能失败：网络错误、GitHub API 错误）
+            try {
+                await this.loadNotes();
+            } catch (error) {
+                console.error('加载笔记失败:', error);
+                // 使用空数组，确保应用可以继续运行
+                this.notes = [];
+                // 尝试从本地存储加载
+                try {
+                    const saved = localStorage.getItem('notes');
+                    if (saved) {
+                        this.notes = JSON.parse(saved);
+                    }
+                } catch (e) {
+                    console.warn('从本地存储加载失败:', e);
+                }
+            }
+
+            // 3. 设置事件监听器（可能失败：DOM 元素不存在）
+            try {
+                this.setupEventListeners();
+            } catch (error) {
+                console.error('设置事件监听器失败:', error);
+                // 部分功能可能不可用，但应用仍可运行
+                this.showMessage('部分功能初始化失败，请刷新页面重试', 'error');
+            }
+
+            // 4. 延迟渲染，确保 DOM 已加载
+            setTimeout(() => {
+                try {
+                    // 尝试渲染笔记列表
+                    const hasRendered = this.renderNotesList();
+                    
+                    // 如果配置了 GitHub，尝试加载目录树
+                    if (githubAPI.isConfigured()) {
+                        this.loadDirectoryTree().catch((error) => {
+                            console.warn('加载目录树失败:', error);
+                            // 如果目录树加载失败，显示空的 root 目录
+                            const rootTree = [{
+                                type: 'dir',
+                                name: 'root',
+                                path: 'root',
+                                children: []
+                            }];
+                            this.renderDirectoryTree(rootTree);
+                        });
+                    }
+                } catch (error) {
+                    console.error('渲染失败:', error);
+                    // 显示空的 root 目录，而不是错误提示
+                    const rootTree = [{
+                        type: 'dir',
+                        name: 'root',
+                        path: 'root',
+                        children: []
+                    }];
+                    this.renderDirectoryTree(rootTree);
+                }
+            }, 100);
+
+            // 5. 启动自动同步（可能失败：但不应阻止应用运行）
+            try {
+                this.startAutoSync();
+            } catch (error) {
+                console.warn('启动自动同步失败:', error);
+                // 自动同步失败不影响主要功能
+            }
+        } catch (error) {
+            // 捕获所有未预期的错误
+            console.error('应用初始化失败:', error);
+            // 显示用户友好的错误提示
+            setTimeout(() => {
+                this.showMessage('应用初始化失败，请刷新页面重试', 'error');
+            }, 500);
+        }
     }
 
     /**
@@ -31,6 +117,16 @@ class NotesApp {
         // 保存配置
         document.getElementById('saveConfigBtn').addEventListener('click', () => {
             this.saveConfig();
+        });
+
+        // 同步笔记
+        document.getElementById('syncBtn').addEventListener('click', () => {
+            this.syncNotesFromGitHub();
+        });
+
+        // 切换预览模式
+        document.getElementById('viewModeBtn').addEventListener('click', () => {
+            this.togglePreviewMode();
         });
 
         // 新建笔记
@@ -58,8 +154,19 @@ class NotesApp {
         });
 
         // 搜索
-        document.getElementById('searchInput').addEventListener('input', (e) => {
-            this.filterNotes(e.target.value);
+        document.getElementById('searchInput').addEventListener('input', async (e) => {
+            const query = e.target.value.trim();
+            if (query.length > 0) {
+                await this.searchNotes(query);
+            } else {
+                // 清空搜索，恢复目录树显示
+                await this.loadDirectoryTree();
+            }
+        });
+
+        // 刷新目录树
+        document.getElementById('refreshTreeBtn').addEventListener('click', () => {
+            this.loadDirectoryTree();
         });
 
         // 图片粘贴
@@ -68,20 +175,68 @@ class NotesApp {
             this.handleImagePaste(e);
         });
 
-        // 自动保存（防抖）
+        // 文件拖拽
+        const editorContainer = document.getElementById('editorContainer');
+        editorContainer.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+        });
+
+        editorContainer.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.handleFileDrop(e);
+        });
+        
+        // 文本区域也支持拖拽
+        noteContent.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+        });
+        
+        noteContent.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.handleFileDrop(e);
+        });
+
+        // 自动保存到本地（防抖）
         let saveTimeout;
         noteContent.addEventListener('input', () => {
+            // 实时更新预览
+            if (this.isPreviewMode) {
+                this.updatePreview();
+            }
+            
             clearTimeout(saveTimeout);
             saveTimeout = setTimeout(() => {
-                this.autoSave();
-            }, 2000);
+                this.autoSaveLocal();
+            }, 1000);
         });
 
         document.getElementById('noteTitle').addEventListener('input', () => {
             clearTimeout(saveTimeout);
             saveTimeout = setTimeout(() => {
-                this.autoSave();
-            }, 2000);
+                this.autoSaveLocal();
+            }, 1000);
+        });
+
+        // 新建笔记对话框按钮
+        document.getElementById('cancelNoteBtn').addEventListener('click', () => {
+            this.hideNewNoteDialog();
+        });
+
+        document.getElementById('createNoteBtn').addEventListener('click', () => {
+            this.createNote();
+        });
+
+        // 新建文件夹对话框按钮
+        document.getElementById('cancelFolderBtn').addEventListener('click', () => {
+            this.hideNewFolderDialog();
+        });
+
+        document.getElementById('createFolderBtn').addEventListener('click', () => {
+            this.createFolder();
         });
     }
 
@@ -111,18 +266,33 @@ class NotesApp {
             return;
         }
 
+        this.showLoading(true);
         try {
             githubAPI.init(token, repo);
             localStorage.setItem('github_token', token);
             localStorage.setItem('github_repo', repo);
             
-            // 测试连接
-            await githubAPI.getOrCreateRelease();
+            // 配置成功后，重新加载数据并渲染
+            await this.loadNotes();
             
-            this.showMessage('配置保存成功！', 'success');
+            // 尝试加载目录树（优先使用目录结构）
+            try {
+                await this.loadDirectoryTree();
+            } catch (error) {
+                console.warn('加载目录树失败，使用旧的笔记列表:', error);
+                // 如果目录树加载失败，使用旧的笔记列表
+                this.renderNotesList();
+            }
+            
+            // 重新启动自动同步
+            this.startAutoSync();
+            
+            this.showMessage('配置保存成功！已从 GitHub 同步数据', 'success');
             this.toggleConfigPanel();
         } catch (error) {
             this.showMessage(`配置保存失败: ${error.message}`, 'error');
+        } finally {
+            this.showLoading(false);
         }
     }
 
@@ -135,39 +305,52 @@ class NotesApp {
     }
 
     /**
-     * 加载笔记
+     * 加载笔记（已迁移到目录结构）
+     * 现在笔记数据通过目录树管理
      */
-    loadNotes() {
+    async loadNotes() {
+        // 已迁移到目录结构
+        // 数据通过 loadDirectoryTree() 加载
+        // 这里只保留本地存储的兼容性
         const saved = localStorage.getItem('notes');
         if (saved) {
-            this.notes = JSON.parse(saved);
+            try {
+                this.notes = JSON.parse(saved);
+            } catch (e) {
+                this.notes = [];
+            }
+        } else {
+            this.notes = [];
         }
     }
 
     /**
-     * 保存笔记到本地存储
+     * 保存笔记到本地存储和 GitHub
      */
-    saveNotes() {
+    async saveNotes(syncToGitHub = true) {
+        // 保存到本地存储（用于兼容）
         localStorage.setItem('notes', JSON.stringify(this.notes));
+
+        // 已迁移到目录结构
+        // 笔记通过 saveNoteFile() 直接保存到目录中的文件
     }
 
     /**
-     * 创建新笔记
+     * 创建新笔记（仅在本地缓存，不提交到 GitHub）
      */
     createNewNote() {
-        const newNote = {
-            id: Date.now().toString(),
-            title: '未命名笔记',
-            content: '',
-            attachments: [],
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-        };
-
-        this.notes.unshift(newNote);
-        this.saveNotes();
-        this.renderNotesList();
-        this.selectNote(newNote.id);
+        // 新建笔记只在本地缓存，不提交到 GitHub
+        // 设置 currentNotePath 为 null，表示这是新笔记，还未保存
+        this.currentNotePath = null;
+        this.currentNoteId = null;
+        
+        // 更新 UI
+        document.getElementById('noteTitle').value = '未命名笔记';
+        document.getElementById('noteContent').value = '# 未命名笔记\n\n';
+        document.getElementById('notePath').textContent = '路径: 未保存（新笔记）';
+        
+        document.getElementById('emptyState').classList.add('hidden');
+        document.getElementById('editorContainer').classList.remove('hidden');
     }
 
     /**
@@ -184,7 +367,12 @@ class NotesApp {
         document.getElementById('editorContainer').classList.remove('hidden');
         
         document.getElementById('noteTitle').value = note.title;
-        document.getElementById('noteContent').innerHTML = note.content;
+        document.getElementById('noteContent').value = note.content || '';
+        
+        // 更新预览
+        if (this.isPreviewMode) {
+            this.updatePreview();
+        }
         
         this.renderAttachments(note.attachments);
         this.updateLastSaved(note.updatedAt);
@@ -195,48 +383,226 @@ class NotesApp {
      * 保存当前笔记
      */
     async saveCurrentNote() {
-        if (!this.currentNoteId) return;
+        if (!githubAPI.isConfigured()) {
+            this.showMessage('请先配置 GitHub Token 和仓库', 'error');
+            return;
+        }
 
-        const note = this.notes.find(n => n.id === this.currentNoteId);
-        if (!note) return;
+        const title = document.getElementById('noteTitle').value || '未命名笔记';
+        const content = document.getElementById('noteContent').value || '';
 
-        note.title = document.getElementById('noteTitle').value || '未命名笔记';
-        note.content = document.getElementById('noteContent').innerHTML;
-        note.updatedAt = new Date().toISOString();
+        // 确保内容的第一行是标题（Markdown 格式）
+        let contentToSave = content;
+        const firstLine = content.trim().split('\n')[0];
+        if (!firstLine.startsWith('#')) {
+            // 如果第一行不是标题，添加标题
+            contentToSave = `# ${title}\n\n${content}`;
+        } else {
+            // 如果第一行是标题，更新标题
+            const lines = content.split('\n');
+            lines[0] = `# ${title}`;
+            contentToSave = lines.join('\n');
+        }
 
-        this.saveNotes();
-        this.renderNotesList();
-        this.updateLastSaved(note.updatedAt);
-        this.showMessage('笔记已保存', 'success');
+        // 确定文件路径
+        let filePath = this.currentNotePath;
+        
+        // 如果是新笔记（currentNotePath 为 null），根据标题生成文件名
+        if (!filePath) {
+            // 使用标题作为文件名（去除特殊字符，避免路径问题）
+            const sanitizedTitle = title.replace(/[\/\\:*?"<>|]/g, '_');
+            const fileName = sanitizedTitle.endsWith('.md') ? sanitizedTitle : `${sanitizedTitle}.md`;
+            let parentPath = this.tempParentPath || 'root';
+            
+            // 清理 parentPath：去除末尾斜杠，去除双斜杠
+            parentPath = parentPath.replace(/\/+/g, '/').replace(/\/$/, '');
+            if (!parentPath) parentPath = 'root';
+            
+            filePath = `${parentPath}/${fileName}`;
+        } else {
+            // 如果是已存在的笔记，根据标题更新文件名（如果标题改变了）
+            const pathParts = filePath.split('/');
+            const oldFileName = pathParts[pathParts.length - 1];
+            const sanitizedTitle = title.replace(/[\/\\:*?"<>|]/g, '_');
+            const newFileName = sanitizedTitle.endsWith('.md') ? sanitizedTitle : `${sanitizedTitle}.md`;
+            
+            // 如果文件名改变了，需要删除旧文件并创建新文件
+            if (oldFileName !== newFileName) {
+                const oldFilePath = filePath;
+                pathParts[pathParts.length - 1] = newFileName;
+                filePath = pathParts.join('/');
+                
+                // 保存旧文件路径，稍后删除
+                this.oldFilePathToDelete = oldFilePath;
+            }
+        }
+
+        // 验证并修复路径
+        const pathParts = filePath.split('/');
+        const hasInvalidNotePath = pathParts.some(part => part.startsWith('note_') && !part.includes('.'));
+        
+        if (hasInvalidNotePath) {
+            const validParts = [];
+            
+            for (let i = 0; i < pathParts.length; i++) {
+                const part = pathParts[i];
+                // 跳过空字符串和看起来像笔记文件名但没有扩展名的部分（note_ 开头且没有点）
+                if (!part || (part.startsWith('note_') && !part.includes('.'))) {
+                    continue;
+                }
+                validParts.push(part);
+            }
+            
+            // 确保最后一个部分是 .md 文件
+            const lastPart = validParts[validParts.length - 1];
+            if (!lastPart.endsWith('.md')) {
+                // 使用标题作为文件名
+                const fileName = title ? `${title.replace(/[\/\\:*?"<>|]/g, '_')}.md` : 'untitled.md';
+                validParts[validParts.length - 1] = fileName;
+            }
+            
+            filePath = validParts.join('/');
+        }
+        
+        // 清理路径：去除双斜杠、去除空部分、去除末尾斜杠
+        filePath = filePath.replace(/\/+/g, '/').replace(/\/$/, '');
+        
+        // 确保以 root/ 开头
+        if (!filePath.startsWith('root/')) {
+            filePath = `root/${filePath}`;
+        }
+        
+        // 再次清理路径（防止 root//xxx 的情况）
+        filePath = filePath.replace(/\/+/g, '/').replace(/\/$/, '');
+
+        // 确保 root 目录存在
+        try {
+            await githubAPI.createDirectory('root');
+        } catch (error) {
+            // 目录可能已存在，忽略错误
+        }
+        
+        // 检查并创建所有必要的父目录
+        const pathPartsForDirs = filePath.split('/');
+        if (pathPartsForDirs.length > 2) { // root + filename，如果超过2个部分说明有子目录
+            // 从 root 开始，逐级创建目录
+            let currentPath = 'root';
+            for (let i = 1; i < pathPartsForDirs.length - 1; i++) { // 跳过 root 和文件名
+                const dirName = pathPartsForDirs[i];
+                if (dirName && dirName.trim()) { // 确保目录名不为空
+                    currentPath = `${currentPath}/${dirName}`;
+                    try {
+                        await githubAPI.createDirectory(currentPath);
+                    } catch (error) {
+                        // 目录可能已存在，忽略错误
+                    }
+                }
+            }
+        }
+
+        this.showLoading(true);
+        try {
+            // 如果是新笔记且有待上传的图片，先上传图片并替换 content 中的 data URI
+            if (!this.currentNotePath && this.pendingImages.length > 0) {
+                let updatedContent = contentToSave;
+                
+                // 上传所有待上传的图片
+                for (const pendingImage of this.pendingImages) {
+                    try {
+                        const asset = await githubAPI.uploadImageToDirectory(pendingImage.file, filePath);
+                        
+                        // 替换 content 中的 data URI 为 GitHub URL
+                        const dataUriPattern = new RegExp(`!\\[([^\\]]*)\\]\\(${pendingImage.dataUri.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)`, 'g');
+                        updatedContent = updatedContent.replace(dataUriPattern, `![$1](${asset.url})`);
+                    } catch (error) {
+                        console.warn(`上传图片失败: ${error.message}`, pendingImage);
+                        // 继续处理其他图片
+                    }
+                }
+                
+                // 更新内容
+                contentToSave = updatedContent;
+                
+                // 清空待上传图片列表
+                this.pendingImages = [];
+            }
+            
+            // 保存到 GitHub（如果是新笔记使用 Create，否则使用 Update）
+            const isNewNote = !this.currentNotePath;
+            const commitMessage = isNewNote ? 'Create new note' : 'Update note';
+            await githubAPI.saveNoteFile(filePath, contentToSave, null, commitMessage);
+            
+            // 如果文件名改变了，删除旧文件
+            if (this.oldFilePathToDelete && this.oldFilePathToDelete !== filePath) {
+                try {
+                    await githubAPI.deleteFile(this.oldFilePathToDelete, null, 'Rename note');
+                } catch (error) {
+                    console.warn('删除旧文件失败:', error);
+                }
+                this.oldFilePathToDelete = null;
+            }
+            
+            // 更新 currentNotePath
+            this.currentNotePath = filePath;
+            this.currentNoteId = filePath;
+            document.getElementById('notePath').textContent = `路径: ${filePath}`;
+            
+            // 更新编辑器内容（如果内容被修改了）
+            if (contentToSave !== content) {
+                document.getElementById('noteContent').value = contentToSave;
+            }
+            
+            this.updateLastSaved(new Date().toISOString());
+            this.showMessage('笔记已保存', 'success');
+            
+            // 等待一小段时间，确保 GitHub API 的更改已生效
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // 强制刷新目录树（重新从 GitHub 获取）
+            await this.loadDirectoryTree(true);
+        } catch (error) {
+            this.showMessage(`保存失败: ${error.message}`, 'error');
+            // 即使保存失败，也刷新目录树，确保 UI 状态正确
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await this.loadDirectoryTree(true);
+        } finally {
+            this.showLoading(false);
+        }
     }
 
     /**
-     * 自动保存
+     * 自动保存到本地（快速保存）
      */
-    autoSave() {
+    async autoSaveLocal() {
         if (!this.currentNoteId) return;
 
         const note = this.notes.find(n => n.id === this.currentNoteId);
         if (!note) return;
 
         note.title = document.getElementById('noteTitle').value || '未命名笔记';
-        note.content = document.getElementById('noteContent').innerHTML;
+        note.content = document.getElementById('noteContent').value || '';
         note.updatedAt = new Date().toISOString();
 
-        this.saveNotes();
+        // 只保存到本地，不同步到 GitHub（避免频繁请求）
+        localStorage.setItem('notes', JSON.stringify(this.notes));
         this.updateLastSaved(note.updatedAt);
+        
+        // 更新预览
+        if (this.isPreviewMode) {
+            this.updatePreview();
+        }
     }
 
     /**
      * 删除当前笔记
      */
-    deleteCurrentNote() {
+    async deleteCurrentNote() {
         if (!this.currentNoteId) return;
 
         if (!confirm('确定要删除这个笔记吗？')) return;
 
         this.notes = this.notes.filter(n => n.id !== this.currentNoteId);
-        this.saveNotes();
+        await this.saveNotes();
         this.currentNoteId = null;
 
         document.getElementById('emptyState').classList.remove('hidden');
@@ -250,37 +616,53 @@ class NotesApp {
      * 渲染笔记列表
      */
     renderNotesList() {
-        const list = document.getElementById('notesList');
-        list.innerHTML = '';
-
-        if (this.notes.length === 0) {
-            list.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">暂无笔记，点击"新建笔记"开始</div>';
-            return;
+        // 兼容新旧版本：优先使用 directoryTree，如果没有则使用 notesList
+        const list = document.getElementById('directoryTree') || document.getElementById('notesList');
+        if (!list) {
+            console.warn('找不到目录树或笔记列表容器');
+            return false;
         }
+        
+        try {
+            list.innerHTML = '';
 
-        this.notes.forEach(note => {
-            const item = document.createElement('div');
-            item.className = `note-item ${note.id === this.currentNoteId ? 'active' : ''}`;
-            item.addEventListener('click', () => this.selectNote(note.id));
+            if (this.notes.length === 0) {
+                list.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">暂无笔记，点击"新建笔记"开始</div>';
+                return true;
+            }
 
-            const title = document.createElement('div');
-            title.className = 'note-item-title';
-            title.textContent = note.title || '未命名笔记';
+            this.notes.forEach(note => {
+                const item = document.createElement('div');
+                item.className = `note-item ${note.id === this.currentNoteId ? 'active' : ''}`;
+                item.addEventListener('click', () => this.selectNote(note.id));
 
-            const preview = document.createElement('div');
-            preview.className = 'note-item-preview';
-            const textContent = note.content.replace(/<[^>]*>/g, '').substring(0, 50);
-            preview.textContent = textContent || '空笔记';
+                const title = document.createElement('div');
+                title.className = 'note-item-title';
+                title.textContent = note.title || '未命名笔记';
 
-            const date = document.createElement('div');
-            date.className = 'note-item-date';
-            date.textContent = new Date(note.updatedAt).toLocaleString('zh-CN');
+                const preview = document.createElement('div');
+                preview.className = 'note-item-preview';
+                const textContent = note.content.replace(/<[^>]*>/g, '').substring(0, 50);
+                preview.textContent = textContent || '空笔记';
 
-            item.appendChild(title);
-            item.appendChild(preview);
-            item.appendChild(date);
-            list.appendChild(item);
-        });
+                const date = document.createElement('div');
+                date.className = 'note-item-date';
+                date.textContent = new Date(note.updatedAt).toLocaleString('zh-CN');
+
+                item.appendChild(title);
+                item.appendChild(preview);
+                item.appendChild(date);
+                list.appendChild(item);
+            });
+            
+            return true;
+        } catch (error) {
+            console.error('渲染笔记列表失败:', error);
+            if (list) {
+                list.innerHTML = '<div style="padding: 20px; text-align: center; color: #e74c3c;">渲染失败，请刷新页面</div>';
+            }
+            return false;
+        }
     }
 
     /**
@@ -303,6 +685,287 @@ class NotesApp {
     }
 
     /**
+     * 搜索笔记内容（搜索 root 目录下所有笔记，不包括 files 和 images 目录）
+     */
+    async searchNotes(query) {
+        if (!githubAPI.isConfigured()) {
+            this.showMessage('请先配置 GitHub Token 和仓库', 'error');
+            return;
+        }
+
+        if (!query || query.trim().length === 0) {
+            await this.loadDirectoryTree();
+            return;
+        }
+
+        this.showLoading(true);
+        try {
+            // 获取所有笔记文件（递归搜索，排除 files 和 images 目录）
+            const allNotes = await this.getAllNoteFiles('root');
+            
+            // 搜索匹配的笔记
+            const searchResults = [];
+            const lowerQuery = query.toLowerCase();
+
+            for (const note of allNotes) {
+                try {
+                    const fileData = await githubAPI.readNoteFile(note.path);
+                    if (fileData && fileData.content) {
+                        const content = fileData.content.toLowerCase();
+                        const title = note.title || note.name.replace(/\.md$/, '');
+                        
+                        // 搜索标题和内容
+                        if (title.toLowerCase().includes(lowerQuery) || content.includes(lowerQuery)) {
+                            // 提取匹配的上下文
+                            const lines = fileData.content.split('\n');
+                            let preview = '';
+                            for (let i = 0; i < lines.length; i++) {
+                                if (lines[i].toLowerCase().includes(lowerQuery)) {
+                                    const start = Math.max(0, i - 1);
+                                    const end = Math.min(lines.length, i + 2);
+                                    preview = lines.slice(start, end).join('\n');
+                                    break;
+                                }
+                            }
+                            
+                            searchResults.push({
+                                path: note.path,
+                                title: title,
+                                preview: preview || fileData.content.substring(0, 200),
+                                matchCount: (content.match(new RegExp(lowerQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length
+                            });
+                        }
+                    }
+                } catch (error) {
+                    console.warn(`搜索笔记失败 (${note.path}):`, error);
+                }
+            }
+
+            // 按匹配次数排序
+            searchResults.sort((a, b) => b.matchCount - a.matchCount);
+
+            // 显示搜索结果
+            this.renderSearchResults(searchResults, query);
+        } catch (error) {
+            this.showMessage(`搜索失败: ${error.message}`, 'error');
+            await this.loadDirectoryTree();
+        } finally {
+            this.showLoading(false);
+        }
+    }
+
+    /**
+     * 递归获取所有笔记文件（排除 files 和 images 目录）
+     */
+    async getAllNoteFiles(path) {
+        const notes = [];
+        const contents = await githubAPI.getDirectoryContents(path);
+        
+        for (const item of contents) {
+            // 跳过 files 和 images 目录
+            if (item.type === 'dir' && (item.name === 'files' || item.name === 'images')) {
+                continue;
+            }
+            
+            if (item.type === 'file' && item.name.endsWith('.md')) {
+                notes.push({
+                    path: item.path,
+                    name: item.name,
+                    title: null
+                });
+            } else if (item.type === 'dir') {
+                // 递归获取子目录中的笔记
+                const subNotes = await this.getAllNoteFiles(item.path);
+                notes.push(...subNotes);
+            }
+        }
+        
+        return notes;
+    }
+
+    /**
+     * 渲染搜索结果
+     */
+    renderSearchResults(results, query) {
+        const container = document.getElementById('directoryTree') || document.getElementById('notesList');
+        if (!container) return;
+
+        if (results.length === 0) {
+            container.innerHTML = `<div style="padding: 20px; text-align: center; color: #999;">未找到包含 "${query}" 的笔记</div>`;
+            return;
+        }
+
+        container.innerHTML = '';
+        
+        const resultsDiv = document.createElement('div');
+        resultsDiv.className = 'search-results';
+        resultsDiv.innerHTML = `<div style="padding: 10px; color: #666; font-size: 14px; border-bottom: 1px solid #eee;">找到 ${results.length} 个匹配的笔记</div>`;
+
+        results.forEach(result => {
+            const itemDiv = document.createElement('div');
+            itemDiv.className = 'tree-item tree-item-file search-result-item';
+            itemDiv.style.cursor = 'pointer';
+            itemDiv.style.padding = '10px';
+            itemDiv.style.borderBottom = '1px solid #eee';
+
+            itemDiv.addEventListener('mouseenter', () => {
+                itemDiv.style.backgroundColor = 'rgba(102, 126, 234, 0.1)';
+            });
+            itemDiv.addEventListener('mouseleave', () => {
+                itemDiv.style.backgroundColor = '';
+            });
+
+            const titleDiv = document.createElement('div');
+            titleDiv.style.fontWeight = 'bold';
+            titleDiv.style.marginBottom = '5px';
+            titleDiv.style.color = '#333';
+            titleDiv.textContent = result.title;
+
+            const pathDiv = document.createElement('div');
+            pathDiv.style.fontSize = '12px';
+            pathDiv.style.color = '#999';
+            pathDiv.style.marginBottom = '5px';
+            pathDiv.textContent = result.path;
+
+            const previewDiv = document.createElement('div');
+            previewDiv.style.fontSize = '13px';
+            previewDiv.style.color = '#666';
+            previewDiv.style.maxHeight = '60px';
+            previewDiv.style.overflow = 'hidden';
+            previewDiv.textContent = result.preview;
+
+            itemDiv.appendChild(titleDiv);
+            itemDiv.appendChild(pathDiv);
+            itemDiv.appendChild(previewDiv);
+
+            // 点击打开笔记
+            itemDiv.addEventListener('click', () => {
+                this.openNoteFile(result.path);
+            });
+
+            resultsDiv.appendChild(itemDiv);
+        });
+
+        container.appendChild(resultsDiv);
+    }
+
+    /**
+     * 处理文件拖拽
+     */
+    async handleFileDrop(e) {
+        const files = e.dataTransfer?.files;
+        if (!files || files.length === 0) return;
+
+        // 如果没有打开的笔记，创建一个新笔记
+        const noteContent = document.getElementById('noteContent');
+        const hasNote = noteContent && (noteContent.value.trim().length > 0 || this.currentNotePath || this.currentNoteId);
+        if (!hasNote) {
+            this.createNewNote();
+        }
+
+        // 分离图片和文件
+        const imageFiles = [];
+        const otherFiles = [];
+
+        Array.from(files).forEach(file => {
+            if (file.type.startsWith('image/')) {
+                imageFiles.push(file);
+            } else {
+                otherFiles.push(file);
+            }
+        });
+
+        // 处理图片（类似粘贴图片）
+        for (const file of imageFiles) {
+            await this.handleImageFile(file);
+        }
+
+        // 处理其他文件
+        if (otherFiles.length > 0) {
+            await this.handleFileUpload(otherFiles);
+        }
+    }
+
+    /**
+     * 处理单个图片文件（用于拖拽和粘贴）
+     */
+    async handleImageFile(file) {
+        // 如果是新笔记（未保存），将图片转换为 data URI 存储在本地
+        if (!this.currentNotePath) {
+            // 读取文件为 data URI
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const dataUri = event.target.result;
+                const imageId = `pending_image_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                
+                // 保存到待上传列表
+                this.pendingImages.push({
+                    id: imageId,
+                    file: file,
+                    dataUri: dataUri,
+                    name: file.name || `image_${Date.now()}.png`
+                });
+                
+                // 插入 Markdown 格式的图片到编辑器（使用 data URI）
+                const textarea = document.getElementById('noteContent');
+                const markdownImage = `![${file.name || 'image'}](${dataUri})`;
+                const cursorPos = textarea.selectionStart;
+                const textBefore = textarea.value.substring(0, cursorPos);
+                const textAfter = textarea.value.substring(cursorPos);
+                textarea.value = textBefore + markdownImage + '\n\n' + textAfter;
+                
+                // 设置光标位置
+                const newPos = cursorPos + markdownImage.length + 2;
+                textarea.setSelectionRange(newPos, newPos);
+                textarea.focus();
+                
+                // 更新预览
+                if (this.isPreviewMode) {
+                    this.updatePreview();
+                }
+                
+                this.showMessage('图片已添加到笔记（将在保存时上传）', 'success');
+            };
+            reader.readAsDataURL(file);
+        } else {
+            // 如果笔记已保存，立即上传
+            if (!githubAPI.isConfigured()) {
+                this.showMessage('请先配置 GitHub Token 和仓库', 'error');
+                return;
+            }
+            
+            this.showLoading(true);
+            try {
+                const asset = await githubAPI.uploadImageToDirectory(file, this.currentNotePath);
+                
+                // 插入 Markdown 格式的图片到编辑器
+                const textarea = document.getElementById('noteContent');
+                const markdownImage = `![${asset.name}](${asset.url})`;
+                const cursorPos = textarea.selectionStart;
+                const textBefore = textarea.value.substring(0, cursorPos);
+                const textAfter = textarea.value.substring(cursorPos);
+                textarea.value = textBefore + markdownImage + '\n\n' + textAfter;
+                
+                // 设置光标位置
+                const newPos = cursorPos + markdownImage.length + 2;
+                textarea.setSelectionRange(newPos, newPos);
+                textarea.focus();
+                
+                // 更新预览
+                if (this.isPreviewMode) {
+                    this.updatePreview();
+                }
+                
+                this.showMessage('图片已上传', 'success');
+            } catch (error) {
+                this.showMessage(`图片上传失败: ${error.message}`, 'error');
+            } finally {
+                this.showLoading(false);
+            }
+        }
+    }
+
+    /**
      * 处理文件上传
      */
     async handleFileUpload(files) {
@@ -311,7 +974,7 @@ class NotesApp {
             return;
         }
 
-        if (!this.currentNoteId) {
+        if (!this.currentNotePath) {
             this.showMessage('请先选择或创建一个笔记', 'error');
             return;
         }
@@ -319,27 +982,77 @@ class NotesApp {
         this.showLoading(true);
 
         try {
-            const note = this.notes.find(n => n.id === this.currentNoteId);
-            if (!note) return;
-
-            const uploadPromises = Array.from(files).map(async (file) => {
-                const asset = await githubAPI.uploadFileToRelease(file);
-                return {
-                    name: asset.name,
-                    url: asset.url,
-                    size: asset.size,
-                    type: file.type
-                };
-            });
-
-            const attachments = await Promise.all(uploadPromises);
-            note.attachments = note.attachments || [];
-            note.attachments.push(...attachments);
-            note.updatedAt = new Date().toISOString();
-
-            this.saveNotes();
-            this.renderAttachments(note.attachments);
-            this.showMessage(`成功上传 ${attachments.length} 个文件`, 'success');
+            const uploadResults = [];
+            
+            // 先检查所有文件是否存在
+            for (const file of files) {
+                const checkResult = await githubAPI.uploadFileToDirectory(file, this.currentNotePath);
+                
+                if (checkResult.exists) {
+                    // 文件已存在，询问是否覆盖
+                    const shouldOverwrite = confirm(`文件 "${checkResult.name}" 已存在，是否覆盖？`);
+                    if (shouldOverwrite) {
+                        // 强制覆盖
+                        const asset = await githubAPI.uploadFileToDirectoryForce(
+                            file, 
+                            this.currentNotePath, 
+                            checkResult.name, 
+                            checkResult.sha
+                        );
+                        uploadResults.push({
+                            name: asset.name,
+                            url: asset.url,
+                            path: asset.path,
+                            size: file.size,
+                            type: file.type
+                        });
+                    } else {
+                        // 跳过此文件
+                        this.showMessage(`已跳过文件: ${checkResult.name}`, 'info');
+                    }
+                } else {
+                    // 文件不存在，直接使用上传结果
+                    uploadResults.push({
+                        name: checkResult.name,
+                        url: checkResult.url,
+                        path: checkResult.path,
+                        size: file.size,
+                        type: file.type
+                    });
+                }
+            }
+            
+            if (uploadResults.length === 0) {
+                this.showMessage('没有文件被上传', 'info');
+                return;
+            }
+            
+            // 在笔记中插入文件链接（Markdown 格式）
+            const textarea = document.getElementById('noteContent');
+            if (textarea) {
+                let fileLinks = '';
+                uploadResults.forEach(attachment => {
+                    fileLinks += `[${attachment.name}](${attachment.url})\n`;
+                });
+                
+                // 在光标位置插入文件链接
+                const cursorPos = textarea.selectionStart;
+                const textBefore = textarea.value.substring(0, cursorPos);
+                const textAfter = textarea.value.substring(cursorPos);
+                textarea.value = textBefore + (textBefore.endsWith('\n') ? '' : '\n') + fileLinks + textAfter;
+                
+                // 设置光标位置
+                const newPos = cursorPos + fileLinks.length + (textBefore.endsWith('\n') ? 0 : 1);
+                textarea.setSelectionRange(newPos, newPos);
+                textarea.focus();
+                
+                // 更新预览
+                if (this.isPreviewMode) {
+                    this.updatePreview();
+                }
+            }
+            
+            this.showMessage(`成功上传 ${uploadResults.length} 个文件`, 'success');
         } catch (error) {
             this.showMessage(`上传失败: ${error.message}`, 'error');
         } finally {
@@ -351,66 +1064,219 @@ class NotesApp {
     }
 
     /**
-     * 处理图片粘贴
+     * 处理图片粘贴（支持 CTRL+V）
      */
     async handleImagePaste(e) {
         const items = e.clipboardData?.items;
         if (!items) return;
 
-        if (!githubAPI.isConfigured()) {
-            this.showMessage('请先配置 GitHub Token 和仓库', 'error');
-            return;
-        }
-
-        if (!this.currentNoteId) {
+        // 如果没有打开的笔记，创建一个新笔记
+        // 检查是否有编辑器内容，如果有说明已经有笔记了（即使未保存）
+        const noteContent = document.getElementById('noteContent');
+        const hasNote = noteContent && (noteContent.value.trim().length > 0 || this.currentNotePath || this.currentNoteId);
+        if (!hasNote) {
             this.createNewNote();
         }
-
-        const note = this.notes.find(n => n.id === this.currentNoteId);
-        if (!note) return;
 
         for (let item of items) {
             if (item.type.indexOf('image') !== -1) {
                 e.preventDefault();
                 
-                this.showLoading(true);
-
                 try {
                     const file = item.getAsFile();
-                    const asset = await githubAPI.uploadImage(file);
                     
-                    // 插入图片到编辑器
-                    const img = document.createElement('img');
-                    img.src = asset.url;
-                    img.alt = asset.name;
-                    
-                    const selection = window.getSelection();
-                    if (selection.rangeCount > 0) {
-                        const range = selection.getRangeAt(0);
-                        range.deleteContents();
-                        range.insertNode(img);
+                    // 如果是新笔记（未保存），将图片转换为 data URI 存储在本地
+                    if (!this.currentNotePath) {
+                        // 读取文件为 data URI
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                            const dataUri = event.target.result;
+                            const imageId = `pending_image_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                            
+                            // 保存到待上传列表
+                            this.pendingImages.push({
+                                id: imageId,
+                                file: file,
+                                dataUri: dataUri,
+                                name: file.name || `image_${Date.now()}.png`
+                            });
+                            
+                            // 插入 Markdown 格式的图片到编辑器（使用 data URI）
+                            const textarea = document.getElementById('noteContent');
+                            const markdownImage = `![${file.name || 'image'}](${dataUri})`;
+                            const cursorPos = textarea.selectionStart;
+                            const textBefore = textarea.value.substring(0, cursorPos);
+                            const textAfter = textarea.value.substring(cursorPos);
+                            textarea.value = textBefore + markdownImage + '\n\n' + textAfter;
+                            
+                            // 设置光标位置
+                            const newPos = cursorPos + markdownImage.length + 2;
+                            textarea.setSelectionRange(newPos, newPos);
+                            textarea.focus();
+                            
+                            // 更新预览
+                            if (this.isPreviewMode) {
+                                this.updatePreview();
+                            }
+                            
+                            this.showMessage('图片已添加到笔记（将在保存时上传）', 'success');
+                        };
+                        reader.readAsDataURL(file);
                     } else {
-                        document.getElementById('noteContent').appendChild(img);
+                        // 如果笔记已保存，立即上传
+                        if (!githubAPI.isConfigured()) {
+                            this.showMessage('请先配置 GitHub Token 和仓库', 'error');
+                            return;
+                        }
+                        
+                        this.showLoading(true);
+                        try {
+                            const asset = await githubAPI.uploadImageToDirectory(file, this.currentNotePath);
+                            
+                            // 插入 Markdown 格式的图片到编辑器
+                            const textarea = document.getElementById('noteContent');
+                            const markdownImage = `![${asset.name}](${asset.url})`;
+                            const cursorPos = textarea.selectionStart;
+                            const textBefore = textarea.value.substring(0, cursorPos);
+                            const textAfter = textarea.value.substring(cursorPos);
+                            textarea.value = textBefore + markdownImage + '\n\n' + textAfter;
+                            
+                            // 设置光标位置
+                            const newPos = cursorPos + markdownImage.length + 2;
+                            textarea.setSelectionRange(newPos, newPos);
+                            textarea.focus();
+                            
+                            // 更新预览
+                            if (this.isPreviewMode) {
+                                this.updatePreview();
+                            }
+                            
+                            this.showMessage('图片已上传', 'success');
+                        } catch (error) {
+                            this.showMessage(`图片上传失败: ${error.message}`, 'error');
+                        } finally {
+                            this.showLoading(false);
+                        }
                     }
-
-                    // 保存附件信息
-                    note.attachments = note.attachments || [];
-                    note.attachments.push({
-                        name: asset.name,
-                        url: asset.url,
-                        size: asset.size,
-                        type: 'image'
-                    });
-                    note.updatedAt = new Date().toISOString();
-
-                    this.saveNotes();
-                    this.renderAttachments(note.attachments);
-                    this.showMessage('图片已上传', 'success');
                 } catch (error) {
-                    this.showMessage(`图片上传失败: ${error.message}`, 'error');
-                } finally {
-                    this.showLoading(false);
+                    this.showMessage(`图片处理失败: ${error.message}`, 'error');
                 }
+            }
+        }
+    }
+
+    /**
+     * 处理文件拖拽
+     */
+    async handleFileDrop(e) {
+        const files = e.dataTransfer?.files;
+        if (!files || files.length === 0) return;
+
+        // 如果没有打开的笔记，创建一个新笔记
+        const noteContent = document.getElementById('noteContent');
+        const hasNote = noteContent && (noteContent.value.trim().length > 0 || this.currentNotePath || this.currentNoteId);
+        if (!hasNote) {
+            this.createNewNote();
+        }
+
+        // 分离图片和文件
+        const imageFiles = [];
+        const otherFiles = [];
+
+        Array.from(files).forEach(file => {
+            if (file.type.startsWith('image/')) {
+                imageFiles.push(file);
+            } else {
+                otherFiles.push(file);
+            }
+        });
+
+        // 处理图片（类似粘贴图片）
+        for (const file of imageFiles) {
+            await this.handleImageFile(file);
+        }
+
+        // 处理其他文件
+        if (otherFiles.length > 0) {
+            await this.handleFileUpload(otherFiles);
+        }
+    }
+
+    /**
+     * 处理单个图片文件（用于拖拽和粘贴）
+     */
+    async handleImageFile(file) {
+        // 如果是新笔记（未保存），将图片转换为 data URI 存储在本地
+        if (!this.currentNotePath) {
+            // 读取文件为 data URI
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const dataUri = event.target.result;
+                const imageId = `pending_image_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                
+                // 保存到待上传列表
+                this.pendingImages.push({
+                    id: imageId,
+                    file: file,
+                    dataUri: dataUri,
+                    name: file.name || `image_${Date.now()}.png`
+                });
+                
+                // 插入 Markdown 格式的图片到编辑器（使用 data URI）
+                const textarea = document.getElementById('noteContent');
+                const markdownImage = `![${file.name || 'image'}](${dataUri})`;
+                const cursorPos = textarea.selectionStart;
+                const textBefore = textarea.value.substring(0, cursorPos);
+                const textAfter = textarea.value.substring(cursorPos);
+                textarea.value = textBefore + markdownImage + '\n\n' + textAfter;
+                
+                // 设置光标位置
+                const newPos = cursorPos + markdownImage.length + 2;
+                textarea.setSelectionRange(newPos, newPos);
+                textarea.focus();
+                
+                // 更新预览
+                if (this.isPreviewMode) {
+                    this.updatePreview();
+                }
+                
+                this.showMessage('图片已添加到笔记（将在保存时上传）', 'success');
+            };
+            reader.readAsDataURL(file);
+        } else {
+            // 如果笔记已保存，立即上传
+            if (!githubAPI.isConfigured()) {
+                this.showMessage('请先配置 GitHub Token 和仓库', 'error');
+                return;
+            }
+            
+            this.showLoading(true);
+            try {
+                const asset = await githubAPI.uploadImageToDirectory(file, this.currentNotePath);
+                
+                // 插入 Markdown 格式的图片到编辑器
+                const textarea = document.getElementById('noteContent');
+                const markdownImage = `![${asset.name}](${asset.url})`;
+                const cursorPos = textarea.selectionStart;
+                const textBefore = textarea.value.substring(0, cursorPos);
+                const textAfter = textarea.value.substring(cursorPos);
+                textarea.value = textBefore + markdownImage + '\n\n' + textAfter;
+                
+                // 设置光标位置
+                const newPos = cursorPos + markdownImage.length + 2;
+                textarea.setSelectionRange(newPos, newPos);
+                textarea.focus();
+                
+                // 更新预览
+                if (this.isPreviewMode) {
+                    this.updatePreview();
+                }
+                
+                this.showMessage('图片已上传', 'success');
+            } catch (error) {
+                this.showMessage(`图片上传失败: ${error.message}`, 'error');
+            } finally {
+                this.showLoading(false);
             }
         }
     }
@@ -491,7 +1357,759 @@ class NotesApp {
             toast.classList.add('hidden');
         }, 3000);
     }
+
+    /**
+     * 从 GitHub 同步笔记（已迁移到目录结构）
+     */
+    async syncNotesFromGitHub() {
+        if (!githubAPI.isConfigured()) {
+            this.showMessage('请先配置 GitHub Token 和仓库', 'error');
+            return;
+        }
+
+        this.showLoading(true);
+
+        try {
+            // 已迁移到目录结构，重新加载目录树即可
+            await this.loadDirectoryTree();
+            this.showMessage('同步成功！', 'success');
+        } catch (error) {
+            this.showMessage(`同步失败: ${error.message}`, 'error');
+        } finally {
+            this.showLoading(false);
+        }
+    }
+
+    /**
+     * 合并笔记（智能合并策略）
+     */
+    mergeNotes(localNotes, remoteNotes) {
+        const notesMap = new Map();
+        
+        // 先添加远程笔记
+        remoteNotes.forEach(note => {
+            notesMap.set(note.id, note);
+        });
+        
+        // 合并本地笔记：如果本地更新则保留本地，否则保留远程
+        localNotes.forEach(localNote => {
+            const remoteNote = notesMap.get(localNote.id);
+            if (!remoteNote) {
+                // 本地独有的笔记
+                notesMap.set(localNote.id, localNote);
+            } else {
+                // 比较更新时间，保留最新的
+                const localTime = new Date(localNote.updatedAt).getTime();
+                const remoteTime = new Date(remoteNote.updatedAt).getTime();
+                if (localTime > remoteTime) {
+                    notesMap.set(localNote.id, localNote);
+                }
+            }
+        });
+        
+        // 转换为数组并按更新时间排序
+        return Array.from(notesMap.values()).sort((a, b) => {
+            return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+        });
+    }
+
+    /**
+     * 启动自动同步
+     */
+    startAutoSync() {
+        // 如果已经启动，先清除
+        if (this.autoSyncInterval) {
+            clearInterval(this.autoSyncInterval);
+        }
+
+        // 每 60 秒自动同步到 GitHub（增加间隔，减少 commit 数量）
+        // 注意：只在内容真正改变时才会创建 commit
+        this.autoSyncInterval = setInterval(async () => {
+            if (githubAPI.isConfigured() && !this.syncInProgress) {
+                await this.autoSyncToGitHub();
+            }
+        }, 60000); // 60 秒
+
+        // 页面可见性变化时同步（避免重复绑定）
+        if (!this.visibilityHandler) {
+            this.visibilityHandler = async () => {
+                if (!document.hidden && githubAPI.isConfigured() && !this.syncInProgress) {
+                    await this.autoSyncToGitHub();
+                }
+            };
+            document.addEventListener('visibilitychange', this.visibilityHandler);
+        }
+
+        // 页面关闭前同步（避免重复绑定）
+        if (!this.beforeUnloadHandler) {
+            this.beforeUnloadHandler = () => {
+                if (githubAPI.isConfigured() && !this.syncInProgress) {
+                    // 同步保存当前笔记到本地
+                    if (this.currentNoteId) {
+                        const note = this.notes.find(n => n.id === this.currentNoteId);
+                        if (note) {
+                            note.title = document.getElementById('noteTitle').value || '未命名笔记';
+                            note.content = document.getElementById('noteContent').value || '';
+                            note.updatedAt = new Date().toISOString();
+                        }
+                    }
+                    localStorage.setItem('notes', JSON.stringify(this.notes));
+                    // 尝试同步到 GitHub（不阻塞页面关闭）
+                    this.autoSyncToGitHub().catch(() => {});
+                }
+            };
+            window.addEventListener('beforeunload', this.beforeUnloadHandler);
+        }
+    }
+
+    /**
+     * 自动同步到 GitHub（静默同步，只在内容改变时创建 commit）
+     */
+    async autoSyncToGitHub() {
+        if (this.syncInProgress) return;
+        
+        this.syncInProgress = true;
+        try {
+            // 先保存当前编辑的笔记到本地
+            if (this.currentNoteId) {
+                const note = this.notes.find(n => n.id === this.currentNoteId);
+                if (note) {
+                    const newTitle = document.getElementById('noteTitle').value || '未命名笔记';
+                    const newContent = document.getElementById('noteContent').value || '';
+                    
+                    // 检查内容是否真的改变了
+                    if (note.title === newTitle && note.content === newContent) {
+                        // 内容没有改变，跳过同步
+                        this.syncInProgress = false;
+                        return;
+                    }
+                    
+                    note.title = newTitle;
+                    note.content = newContent;
+                    note.updatedAt = new Date().toISOString();
+                }
+            }
+            
+            // 更新本地存储（用于兼容）
+            localStorage.setItem('notes', JSON.stringify(this.notes));
+
+            // 已迁移到目录结构，不再使用 saveNotesData()
+            // 笔记通过 saveNoteFile() 直接保存到目录中的文件
+        } catch (error) {
+            console.error('自动同步失败:', error);
+            // 静默失败，不显示错误提示（自动同步不应该打扰用户）
+            // 但会在控制台记录错误，方便调试
+        } finally {
+            this.syncInProgress = false;
+        }
+    }
+
+    /**
+     * 切换预览模式
+     */
+    togglePreviewMode() {
+        this.isPreviewMode = !this.isPreviewMode;
+        const editor = document.getElementById('noteContent');
+        const preview = document.getElementById('markdownPreview');
+        const viewBtn = document.getElementById('viewModeBtn');
+
+        if (this.isPreviewMode) {
+            // 切换到预览模式
+            editor.classList.add('hidden');
+            preview.classList.remove('hidden');
+            viewBtn.textContent = '✏️ 编辑';
+            this.updatePreview();
+        } else {
+            // 切换到编辑模式
+            editor.classList.remove('hidden');
+            preview.classList.add('hidden');
+            viewBtn.textContent = '👁️ 预览';
+        }
+    }
+
+    /**
+     * 更新 Markdown 预览
+     */
+    updatePreview() {
+        const content = document.getElementById('noteContent').value;
+        const preview = document.getElementById('markdownPreview');
+        
+        if (typeof marked !== 'undefined') {
+            // 使用 marked.js 渲染 Markdown
+            preview.innerHTML = marked.parse(content);
+        } else {
+            // 如果没有 marked.js，显示原始文本
+            preview.textContent = content;
+        }
+    }
+
+    /**
+     * 加载目录树（从 root 目录）
+     */
+    async loadDirectoryTree(forceRefresh = false) {
+        if (!githubAPI.isConfigured()) {
+            // 如果未配置，使用旧的笔记列表
+            this.renderNotesList();
+            return;
+        }
+
+        try {
+            // 如果强制刷新，先清空容器
+            if (forceRefresh) {
+                const container = document.getElementById('directoryTree') || document.getElementById('notesList');
+                if (container) {
+                    container.innerHTML = '';
+                }
+            }
+
+            // 先快速显示 root 目录（即使为空），不等待任何操作
+            const emptyRootTree = [{
+                type: 'dir',
+                name: 'root',
+                path: 'root',
+                children: []
+            }];
+            this.renderDirectoryTree(emptyRootTree);
+
+            // 异步检查并创建 root 目录（不阻塞显示）
+            githubAPI.createDirectory('root').catch(error => {
+                // 目录可能已存在，忽略错误
+            });
+
+            // 从 GitHub 重新获取目录结构
+            // 如果是强制刷新，绕过缓存获取最新数据
+            let tree = [];
+            try {
+                tree = await githubAPI.getDirectoryTreeFast('root', null, forceRefresh);
+            } catch (error) {
+                // 如果获取失败，使用空数组（确保 root 目录仍然显示）
+                console.warn('获取 root 目录内容失败，使用空目录:', error);
+                tree = [];
+            }
+            
+            // 确保 tree 是数组
+            if (!Array.isArray(tree)) {
+                tree = [];
+            }
+            
+            // 过滤掉 files 和 images 目录
+            const filteredTree = this.filterTree(tree, ['files', 'images']);
+            
+            // 将 root 目录本身也显示出来，包装成一个包含 root 的树结构
+            // 即使 filteredTree 为空，root 目录也要显示
+            const rootTree = [{
+                type: 'dir',
+                name: 'root',
+                path: 'root',
+                children: Array.isArray(filteredTree) ? filteredTree : []
+            }];
+            
+            // 渲染目录结构（使用文件名作为标题）
+            this.renderDirectoryTree(rootTree);
+            
+            // 然后异步加载文件标题并更新显示（不阻塞初始显示）
+            // 如果是强制刷新，也加载标题并绕过缓存
+            if (forceRefresh) {
+                await this.loadDirectoryTreeTitles(true);
+            } else {
+                this.loadDirectoryTreeTitles(false);
+            }
+        } catch (error) {
+            console.warn('加载目录树失败，显示空的 root 目录:', error);
+            // 即使出错，也显示 root 目录（空目录）
+            const rootTree = [{
+                type: 'dir',
+                name: 'root',
+                path: 'root',
+                children: []
+            }];
+            this.renderDirectoryTree(rootTree);
+        }
+    }
+
+    /**
+     * 异步加载目录树中的文件标题（不阻塞初始显示）
+     */
+    async loadDirectoryTreeTitles(bypassCache = false) {
+        if (!githubAPI.isConfigured()) {
+            return;
+        }
+
+        try {
+            // 加载带标题的完整目录树
+            const tree = await githubAPI.getDirectoryTreeWithTitles('root', null, bypassCache);
+            
+            // 确保 tree 是数组
+            if (!Array.isArray(tree)) {
+                // 如果获取失败，确保至少显示 root 目录
+                const rootTree = [{
+                    type: 'dir',
+                    name: 'root',
+                    path: 'root',
+                    children: []
+                }];
+                this.renderDirectoryTree(rootTree);
+                return;
+            }
+            
+            // 过滤掉 files 和 images 目录
+            const filteredTree = this.filterTree(tree, ['files', 'images']);
+            
+            // 将 root 目录本身也显示出来
+            // 即使 filteredTree 为空，root 目录也要显示
+            const rootTree = [{
+                type: 'dir',
+                name: 'root',
+                path: 'root',
+                children: Array.isArray(filteredTree) ? filteredTree : []
+            }];
+            
+            // 更新目录树显示（使用真实标题）
+            this.renderDirectoryTree(rootTree);
+        } catch (error) {
+            console.warn('加载目录树标题失败:', error);
+            // 失败不影响使用，确保至少显示 root 目录
+            const rootTree = [{
+                type: 'dir',
+                name: 'root',
+                path: 'root',
+                children: []
+            }];
+            this.renderDirectoryTree(rootTree);
+        }
+    }
+
+    /**
+     * 过滤目录树，移除指定的目录（files 和 images）
+     */
+    filterTree(tree, excludeNames) {
+        if (!tree || !Array.isArray(tree)) {
+            return [];
+        }
+        
+        return tree
+            .filter(item => {
+                // 过滤掉 files 和 images 目录（递归过滤所有层级）
+                if (item.type === 'dir' && excludeNames.includes(item.name)) {
+                    return false;
+                }
+                return true;
+            })
+            .map(item => {
+                // 递归过滤子项
+                if (item.type === 'dir' && item.children && item.children.length > 0) {
+                    return {
+                        ...item,
+                        children: this.filterTree(item.children, excludeNames)
+                    };
+                }
+                return item;
+            });
+    }
+
+    /**
+     * 渲染目录树
+     */
+    renderDirectoryTree(tree, container = null, level = 0) {
+        const list = container || document.getElementById('directoryTree') || document.getElementById('notesList');
+        if (!list) return;
+
+        if (level === 0) {
+            list.innerHTML = '';
+        }
+
+        tree.forEach(item => {
+            const itemDiv = document.createElement('div');
+            itemDiv.className = `tree-item ${item.type === 'dir' ? 'tree-item-folder' : 'tree-item-file'}`;
+            itemDiv.style.paddingLeft = `${level * 20}px`;
+            itemDiv.setAttribute('data-path', item.path);
+            itemDiv.setAttribute('data-type', item.type);
+
+            const name = item.name;
+
+            // 转义路径中的特殊字符，避免 XSS
+            const escapedPath = item.path.replace(/"/g, '&quot;');
+            const escapedName = name.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+            // 创建图标容器
+            const iconSpan = document.createElement('span');
+            iconSpan.className = `tree-item-icon ${item.type === 'dir' ? 'icon-folder' : 'icon-file'}`;
+            iconSpan.setAttribute('aria-label', item.type === 'dir' ? '文件夹' : '文件');
+            
+            // 如果是文件夹，添加展开/折叠图标
+            if (item.type === 'dir') {
+                const expandIcon = document.createElement('span');
+                expandIcon.className = 'tree-expand-icon';
+                expandIcon.textContent = item.children && item.children.length > 0 ? '▶' : ' ';
+                expandIcon.setAttribute('data-expanded', 'false');
+                iconSpan.appendChild(expandIcon);
+                
+                const folderIcon = document.createElement('span');
+                folderIcon.textContent = '📁';
+                iconSpan.appendChild(folderIcon);
+            } else {
+                iconSpan.textContent = '📄';
+            }
+
+            // 创建名称元素
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'tree-item-name';
+            // 如果是笔记文件，显示标题而不是文件名
+            if (item.type === 'file' && item.name.endsWith('.md') && item.title) {
+                nameSpan.textContent = item.title;
+                nameSpan.setAttribute('title', `${item.title} (${item.name})`);
+            } else {
+                nameSpan.textContent = escapedName;
+                nameSpan.setAttribute('title', escapedName);
+            }
+
+            // 创建操作按钮容器
+            const actionsSpan = document.createElement('span');
+            actionsSpan.className = 'tree-item-actions';
+
+            // 如果是文件夹，添加新建笔记按钮
+            if (item.type === 'dir') {
+                const newNoteBtn = document.createElement('button');
+                newNoteBtn.className = 'btn-new-note';
+                newNoteBtn.setAttribute('data-path', item.path);
+                newNoteBtn.title = '在此文件夹新建笔记';
+                newNoteBtn.textContent = '+';
+                actionsSpan.appendChild(newNoteBtn);
+            }
+
+            // 添加删除按钮（root 目录不能删除）
+            let deleteBtn = null;
+            if (item.path !== 'root') {
+                deleteBtn = document.createElement('button');
+                deleteBtn.className = 'btn-delete';
+                deleteBtn.setAttribute('data-path', item.path);
+                deleteBtn.setAttribute('data-type', item.type);
+                deleteBtn.title = '删除';
+                deleteBtn.textContent = '🗑️';
+                actionsSpan.appendChild(deleteBtn);
+            }
+
+            // 组装元素
+            itemDiv.appendChild(iconSpan);
+            itemDiv.appendChild(nameSpan);
+            itemDiv.appendChild(actionsSpan);
+
+            // 点击事件
+            itemDiv.addEventListener('click', (e) => {
+                if (e.target.classList.contains('btn-delete') || e.target.classList.contains('btn-new-note')) {
+                    return; // 让按钮处理自己的事件
+                }
+                if (item.type === 'file') {
+                    this.openNoteFile(item.path);
+                } else {
+                    // 切换文件夹展开/折叠
+                    const children = itemDiv.nextElementSibling;
+                    if (children && children.classList.contains('tree-children')) {
+                        const isHidden = children.classList.contains('hidden');
+                        children.classList.toggle('hidden');
+                        
+                        // 更新展开/折叠图标
+                        const expandIcon = iconSpan.querySelector('.tree-expand-icon');
+                        if (expandIcon) {
+                            expandIcon.textContent = isHidden ? '▼' : '▶';
+                        }
+                    }
+                }
+            });
+
+            // 删除按钮事件（只有在 deleteBtn 存在时才添加）
+            if (deleteBtn) {
+                deleteBtn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    if (confirm(`确定要删除${item.type === 'dir' ? '文件夹' : '文件'} "${name}" 吗？`)) {
+                        await this.deleteFileOrFolder(item.path, item.type);
+                        // deleteFileOrFolder 内部已经会刷新目录树
+                    }
+                });
+            }
+
+            // 新建笔记按钮事件（如果是文件夹，newNoteBtn 已经在上面创建了）
+            if (item.type === 'dir') {
+                const newNoteBtn = actionsSpan.querySelector('.btn-new-note');
+                if (newNoteBtn) {
+                    newNoteBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        // item.path 是目录路径，直接使用
+                        this.showNewNoteDialog(item.path);
+                    });
+                }
+            }
+
+            list.appendChild(itemDiv);
+
+            // 如果有子项，递归渲染（默认折叠）
+            if (item.children && item.children.length > 0) {
+                const childrenDiv = document.createElement('div');
+                childrenDiv.className = 'tree-children hidden';
+                list.appendChild(childrenDiv);
+                this.renderDirectoryTree(item.children, childrenDiv, level + 1);
+            }
+        });
+    }
+
+    /**
+     * 打开笔记文件
+     */
+    async openNoteFile(filePath) {
+        if (!githubAPI.isConfigured()) {
+            this.showMessage('请先配置 GitHub Token 和仓库', 'error');
+            return;
+        }
+
+        this.showLoading(true);
+        try {
+            const fileData = await githubAPI.readNoteFile(filePath);
+            if (!fileData) {
+                this.showMessage('文件不存在', 'error');
+                return;
+            }
+
+            // 显示文件内容
+            this.currentNotePath = filePath;
+            this.currentNoteId = filePath; // 使用路径作为 ID
+            
+            // 从内容中提取标题
+            let title = fileData.name.replace(/\.md$/, '');
+            const firstLine = fileData.content.trim().split('\n')[0];
+            if (firstLine.startsWith('#')) {
+                title = firstLine.replace(/^#+\s*/, '').trim();
+            }
+            
+            document.getElementById('noteTitle').value = title;
+            document.getElementById('noteContent').value = fileData.content;
+            document.getElementById('notePath').textContent = `路径: ${filePath}`;
+
+            document.getElementById('emptyState').classList.add('hidden');
+            document.getElementById('editorContainer').classList.remove('hidden');
+
+            if (this.isPreviewMode) {
+                this.updatePreview();
+            }
+        } catch (error) {
+            this.showMessage(`打开文件失败: ${error.message}`, 'error');
+        } finally {
+            this.showLoading(false);
+        }
+    }
+
+    /**
+     * 显示新建文件夹对话框
+     */
+    showNewFolderDialog(parentPath = 'root') {
+        // parentPath 默认为 'root' 目录
+        document.getElementById('folderPath').value = parentPath || 'root';
+        document.getElementById('folderName').value = '';
+        document.getElementById('newFolderDialog').classList.remove('hidden');
+    }
+
+    /**
+     * 隐藏新建文件夹对话框
+     */
+    hideNewFolderDialog() {
+        document.getElementById('newFolderDialog').classList.add('hidden');
+    }
+
+    /**
+     * 创建文件夹
+     */
+    async createFolder() {
+        const folderName = document.getElementById('folderName').value.trim();
+        let parentPath = document.getElementById('folderPath').value.trim() || 'root';
+
+        if (!folderName) {
+            this.showMessage('请输入文件夹名称', 'error');
+            return;
+        }
+
+        // 验证 parentPath 是目录路径，不是文件路径
+        if (parentPath.endsWith('.md')) {
+            const lastSlash = parentPath.lastIndexOf('/');
+            parentPath = lastSlash > 0 ? parentPath.substring(0, lastSlash) : 'root';
+        }
+        
+        // 检查 parentPath 是否包含文件名（如 root/note_xxx），如果是则提取目录
+        const pathParts = parentPath.split('/');
+        const lastPart = pathParts[pathParts.length - 1];
+        if (lastPart.startsWith('note_') && !lastPart.includes('.')) {
+            parentPath = pathParts.slice(0, -1).join('/') || 'root';
+        }
+        
+        // 验证 parentPath 必须在 root 目录下或其子目录下
+        if (!parentPath.startsWith('root')) {
+            this.showMessage('保存路径必须在 root 目录下或其子目录下', 'error');
+            return;
+        }
+        
+        // 文件夹创建在 root 目录下
+        const folderPath = parentPath ? `${parentPath}/${folderName}` : `root/${folderName}`;
+
+        this.showLoading(true);
+        try {
+            await githubAPI.createDirectory(folderPath);
+            this.showMessage('文件夹创建成功', 'success');
+            this.hideNewFolderDialog();
+            
+            // 等待一小段时间，确保 GitHub API 的更改已生效
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // 强制刷新目录树（重新从 GitHub 获取）
+            await this.loadDirectoryTree(true);
+        } catch (error) {
+            this.showMessage(`创建文件夹失败: ${error.message}`, 'error');
+            // 即使失败也刷新，确保 UI 状态正确
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await this.loadDirectoryTree(true);
+        } finally {
+            this.showLoading(false);
+        }
+    }
+
+    /**
+     * 显示新建笔记对话框
+     */
+    showNewNoteDialog(parentPath = 'root') {
+        // parentPath 默认为 'root' 目录
+        // 验证 parentPath 是目录路径，不是文件路径
+        let validatedPath = parentPath || 'root';
+        
+        // 如果 parentPath 以 .md 结尾，说明是文件路径，需要提取目录部分
+        if (validatedPath.endsWith('.md')) {
+            const lastSlash = validatedPath.lastIndexOf('/');
+            validatedPath = lastSlash > 0 ? validatedPath.substring(0, lastSlash) : 'root';
+        }
+        
+        // 检查 parentPath 是否包含文件名（如 root/note_xxx），如果是则提取目录
+        const pathParts = validatedPath.split('/');
+        const lastPart = pathParts[pathParts.length - 1];
+        // 如果最后一部分看起来像笔记文件名（以 note_ 开头且没有扩展名），可能是误传
+        if (lastPart.startsWith('note_') && !lastPart.includes('.')) {
+            validatedPath = pathParts.slice(0, -1).join('/') || 'root';
+        }
+        
+        document.getElementById('newNotePath').value = validatedPath;
+        document.getElementById('newNoteName').value = '';
+        document.getElementById('newNoteDialog').classList.remove('hidden');
+    }
+
+    /**
+     * 隐藏新建笔记对话框
+     */
+    hideNewNoteDialog() {
+        document.getElementById('newNoteDialog').classList.add('hidden');
+    }
+
+    /**
+     * 创建笔记（从对话框，仅在本地缓存）
+     */
+    async createNote() {
+        const noteName = document.getElementById('newNoteName').value.trim();
+        let parentPath = document.getElementById('newNotePath').value.trim() || 'root';
+        
+        // 清理路径：去除双斜杠、去除空部分、去除末尾斜杠
+        parentPath = parentPath.replace(/\/+/g, '/').replace(/\/$/, '');
+        if (!parentPath) parentPath = 'root';
+        
+        // 验证 parentPath 是目录路径，不是文件路径
+        if (parentPath.endsWith('.md')) {
+            const lastSlash = parentPath.lastIndexOf('/');
+            parentPath = lastSlash > 0 ? parentPath.substring(0, lastSlash) : 'root';
+        }
+        
+        // 检查 parentPath 是否包含文件名（如 root/note_xxx），如果是则提取目录
+        const pathParts = parentPath.split('/').filter(part => part && part.trim());
+        const lastPart = pathParts[pathParts.length - 1];
+        if (lastPart && lastPart.startsWith('note_') && !lastPart.includes('.')) {
+            pathParts.pop();
+            parentPath = pathParts.length > 0 ? pathParts.join('/') : 'root';
+        } else {
+            parentPath = pathParts.join('/') || 'root';
+        }
+
+        if (!noteName) {
+            this.showMessage('请输入笔记名称', 'error');
+            return;
+        }
+
+        // 验证 parentPath 必须在 root 目录下或其子目录下
+        if (!parentPath.startsWith('root')) {
+            parentPath = 'root';
+        }
+        
+        // 再次清理路径
+        parentPath = parentPath.replace(/\/+/g, '/').replace(/\/$/, '');
+
+        // 新建笔记只在本地缓存，不提交到 GitHub
+        // 保存 parentPath 到临时变量，用于后续保存时使用
+        this.tempParentPath = parentPath;
+        this.currentNotePath = null; // null 表示新笔记，还未保存
+        this.currentNoteId = null;
+
+        // 更新 UI
+        const initialContent = `# ${noteName}\n\n`;
+        document.getElementById('noteTitle').value = noteName;
+        document.getElementById('noteContent').value = initialContent;
+        document.getElementById('notePath').textContent = `路径: 未保存（新笔记）`;
+
+        document.getElementById('emptyState').classList.add('hidden');
+        document.getElementById('editorContainer').classList.remove('hidden');
+
+        // 关闭对话框
+        this.hideNewNoteDialog();
+
+        this.showMessage('笔记已创建（本地），点击保存提交到 GitHub', 'success');
+        
+        // 刷新目录树（虽然新笔记还未保存，但刷新可以确保 UI 状态正确）
+        await this.loadDirectoryTree();
+    }
+
+    /**
+     * 删除文件或文件夹
+     */
+    async deleteFileOrFolder(path, type) {
+        if (!githubAPI.isConfigured()) {
+            this.showMessage('请先配置 GitHub Token 和仓库', 'error');
+            return;
+        }
+
+        this.showLoading(true);
+        try {
+            await githubAPI.deleteFile(path, null, type === 'dir' ? 'Delete folder' : 'Delete file');
+            this.showMessage(`${type === 'dir' ? '文件夹' : '文件'}删除成功`, 'success');
+            
+            // 等待更长时间，确保 GitHub API 的更改已生效（GitHub 可能有缓存）
+            // 对于目录删除，需要更长的等待时间
+            const waitTime = type === 'dir' ? 2000 : 1000;
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+            
+            // 强制刷新目录树（绕过缓存，重新从 GitHub 获取）
+            await this.loadDirectoryTree(true);
+            
+            // 再次等待并刷新一次，确保数据同步
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await this.loadDirectoryTree(true);
+        } catch (error) {
+            this.showMessage(`删除失败: ${error.message}`, 'error');
+            // 即使失败也刷新，确保 UI 状态正确
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            await this.loadDirectoryTree(true);
+        } finally {
+            this.showLoading(false);
+        }
+    }
 }
 
-// 初始化应用
-const app = new NotesApp();
+// 初始化应用（等待 DOM 加载完成）
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        const app = new NotesApp();
+        window.app = app; // 方便调试
+    });
+} else {
+    const app = new NotesApp();
+    window.app = app; // 方便调试
+}
