@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub Pages 记事本</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📝 我的记事本</h1>
+            <div class="header-actions">
+                <button id="configBtn" class="btn btn-secondary">⚙️ 配置</button>
+                <button id="newNoteBtn" class="btn btn-primary">+ 新建笔记</button>
+            </div>
+        </header>
+
+        <!-- 配置面板 -->
+        <div id="configPanel" class="config-panel hidden">
+            <h3>GitHub 配置</h3>
+            <div class="form-group">
+                <label for="githubToken">GitHub Personal Access Token:</label>
+                <input type="password" id="githubToken" placeholder="ghp_xxxxxxxxxxxx">
+                <small>需要 repo 权限，用于上传文件到 release</small>
+            </div>
+            <div class="form-group">
+                <label for="githubRepo">仓库名称 (owner/repo):</label>
+                <input type="text" id="githubRepo" placeholder="username/repo-name">
+            </div>
+            <div class="form-group">
+                <button id="saveConfigBtn" class="btn btn-primary">保存配置</button>
+            </div>
+        </div>
+
+        <!-- 主内容区 -->
+        <div class="main-content">
+            <!-- 侧边栏 - 笔记列表 -->
+            <aside class="sidebar">
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="🔍 搜索笔记...">
+                </div>
+                <div id="notesList" class="notes-list">
+                    <!-- 笔记列表将动态生成 -->
+                </div>
+            </aside>
+
+            <!-- 编辑区 -->
+            <main class="editor-area">
+                <div id="emptyState" class="empty-state">
+                    <p>选择一个笔记开始编辑，或创建新笔记</p>
+                </div>
+
+                <div id="editorContainer" class="editor-container hidden">
+                    <div class="editor-header">
+                        <input type="text" id="noteTitle" placeholder="笔记标题" class="note-title-input">
+                        <div class="editor-actions">
+                            <button id="uploadFileBtn" class="btn btn-icon" title="上传文件">
+                                📎 上传文件
+                            </button>
+                            <input type="file" id="fileInput" multiple style="display: none;">
+                            <button id="deleteNoteBtn" class="btn btn-icon btn-danger" title="删除笔记">
+                                🗑️ 删除
+                            </button>
+                        </div>
+                    </div>
+                    <div class="editor-content">
+                        <div 
+                            id="noteContent" 
+                            contenteditable="true" 
+                            class="note-content"
+                            placeholder="开始输入...支持粘贴图片 (Ctrl+V)"
+                        ></div>
+                    </div>
+                    <div class="editor-footer">
+                        <div class="attachments-list" id="attachmentsList">
+                            <!-- 附件列表 -->
+                        </div>
+                        <div class="editor-info">
+                            <span id="lastSaved">未保存</span>
+                            <button id="saveNoteBtn" class="btn btn-primary">💾 保存</button>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- 加载提示 -->
+    <div id="loadingOverlay" class="loading-overlay hidden">
+        <div class="spinner"></div>
+        <p>处理中...</p>
+    </div>
+
+    <!-- 消息提示 -->
+    <div id="messageToast" class="toast hidden"></div>
+
+    <script src="github-api.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
