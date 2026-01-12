@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub 登录 - 记事本</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📝</text></svg>">
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .login-container {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .login-box {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+        }
+        
+        .login-box h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #333;
+            font-size: 28px;
+        }
+        
+        .login-box .description {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+        
+        .device-code-section {
+            text-align: center;
+            padding: 30px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .user-code {
+            font-size: 32px;
+            font-weight: bold;
+            letter-spacing: 8px;
+            color: #667eea;
+            margin: 20px 0;
+            font-family: 'Monaco', 'Menlo', monospace;
+            padding: 15px;
+            background: white;
+            border-radius: 6px;
+            border: 2px dashed #667eea;
+        }
+        
+        .verification-url {
+            margin: 20px 0;
+        }
+        
+        .verification-url a {
+            color: #667eea;
+            text-decoration: none;
+            font-size: 16px;
+            word-break: break-all;
+        }
+        
+        .verification-url a:hover {
+            text-decoration: underline;
+        }
+        
+        .status-message {
+            text-align: center;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px 0;
+            font-size: 14px;
+        }
+        
+        .status-message.info {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+        
+        .status-message.success {
+            background: #e8f5e9;
+            color: #388e3c;
+        }
+        
+        .status-message.error {
+            background: #ffebee;
+            color: #c62828;
+        }
+        
+        .status-message.waiting {
+            background: #fff3e0;
+            color: #f57c00;
+        }
+        
+        .spinner-small {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(102, 126, 234, 0.3);
+            border-top-color: #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+        
+        .repo-input-section {
+            margin-top: 30px;
+            padding-top: 30px;
+            border-top: 1px solid #e0e0e0;
+        }
+        
+        .repo-input-section label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #555;
+        }
+        
+        .repo-input-section input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+        
+        .repo-input-section small {
+            display: block;
+            color: #888;
+            font-size: 12px;
+            margin-bottom: 15px;
+            line-height: 1.5;
+        }
+        
+        .repo-input-section small a {
+            color: #667eea;
+            text-decoration: none;
+        }
+        
+        .repo-input-section small a:hover {
+            text-decoration: underline;
+        }
+        
+        .btn-start-login {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-start-login:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-start-login:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .warning-box {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 6px;
+            padding: 15px;
+            margin-top: 20px;
+            font-size: 13px;
+            color: #856404;
+        }
+        
+        .warning-box strong {
+            display: block;
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-box">
+            <h1>📝 GitHub 登录</h1>
+            <p class="description">
+                使用 GitHub OAuth 授权登录，或直接输入 Personal Access Token
+            </p>
+            
+            <div id="loginForm">
+                <div class="repo-input-section" style="background: #fff3cd; padding: 15px; border-radius: 6px; border: 1px solid #ffc107; margin-bottom: 20px;">
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="radio" name="loginMethod" id="useToken" value="token" checked style="width: auto;">
+                        <strong>方式 1：直接输入 Personal Access Token（推荐，最简单）</strong>
+                    </label>
+                    <small style="display: block; margin-top: 10px; margin-left: 25px; color: #856404;">
+                        适用于 GitHub Pages 部署，无需配置 OAuth App
+                    </small>
+                </div>
+                
+                <div class="repo-input-section" style="background: #e3f2fd; padding: 15px; border-radius: 6px; border: 1px solid #2196f3; margin-bottom: 20px;">
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="radio" name="loginMethod" id="useOAuth" value="oauth" style="width: auto;">
+                        <strong>方式 2：使用 OAuth 授权（需要配置 OAuth App）</strong>
+                    </label>
+                    <small style="display: block; margin-top: 10px; margin-left: 25px; color: #1565c0;">
+                        适用于需要动态授权的场景，但需要后端服务器支持
+                    </small>
+                </div>
+                
+                <!-- Token 登录方式 -->
+                <div id="tokenLoginSection">
+                    <div class="repo-input-section">
+                        <label for="personalToken">GitHub Personal Access Token:</label>
+                        <input type="password" id="personalToken" placeholder="ghp_xxxxxxxxxxxx" value="">
+                        <small>
+                            需要 repo 权限。访问 <a href="https://github.com/settings/tokens/new" target="_blank">创建 Token</a>
+                            <br>勾选 <strong>repo</strong> 权限，生成后复制并粘贴到这里
+                        </small>
+                    </div>
+                    
+                    <div class="repo-input-section">
+                        <label for="repoNameToken">仓库名称 (owner/repo):</label>
+                        <input type="text" id="repoNameToken" placeholder="username/repo-name" value="Buyuliang/webnotes-test">
+                        <small>请输入你的 GitHub 仓库名称，格式：username/repo-name</small>
+                    </div>
+                    
+                    <button id="loginWithTokenBtn" class="btn-start-login">使用 Token 登录</button>
+                </div>
+                
+                <!-- OAuth 登录方式 -->
+                <div id="oauthLoginSection" style="display: none;">
+                <div class="repo-input-section">
+                    <label for="clientId">OAuth App Client ID:</label>
+                    <input type="text" id="clientId" placeholder="Iv1.xxxxxxxxxxxx" value="">
+                    <small>
+                        需要创建 GitHub OAuth App 获取 Client ID。
+                        <a href="https://github.com/settings/developers" target="_blank">创建 OAuth App →</a>
+                        <br>
+                        <strong>注意：</strong>
+                        <br>• 如果使用后端服务器：Authorization callback URL 填写 http://localhost:3000/oauth/callback
+                        <br>• 如果纯前端：Authorization callback URL 填写当前页面的完整 URL（如 http://localhost:8000/login.html）
+                    </small>
+                </div>
+                
+                <div class="repo-input-section">
+                    <label for="useBackend">使用后端服务器（仅本地开发）:</label>
+                    <input type="checkbox" id="useBackend">
+                    <small>
+                        <strong>注意：</strong>如果部署到 GitHub Pages，请<strong>不要</strong>勾选此项。
+                        <br>勾选后使用本地后端服务器处理 OAuth 回调（仅适用于 localhost 开发）。
+                        <br>需要先运行: <code>npm install && node oauth-callback-server.js</code>
+                    </small>
+                </div>
+                
+                <div class="repo-input-section" id="redirectUriInfo" style="background: #f0f7ff; padding: 15px; border-radius: 6px; border: 1px solid #b3d9ff; margin-top: 10px;">
+                    <strong style="color: #0066cc;">📋 重要：请在 GitHub OAuth App 中配置以下回调地址：</strong>
+                    <div id="redirectUriDisplay" style="margin-top: 10px; padding: 10px; background: white; border-radius: 4px; font-family: monospace; word-break: break-all; color: #d73502; font-weight: bold;">
+                        等待选择...
+                    </div>
+                    <small style="display: block; margin-top: 10px; color: #666;">
+                        <strong>配置步骤：</strong>
+                        <br>1. 访问 <a href="https://github.com/settings/developers" target="_blank">GitHub OAuth Apps</a>
+                        <br>2. 点击你的 OAuth App 或创建新应用
+                        <br>3. 找到 "Authorization callback URL" 字段
+                        <br>4. 将上面显示的地址<strong>完整复制</strong>并粘贴到该字段（必须完全一致，包括 https://）
+                        <br>5. 点击 "Update application" 保存
+                        <br>6. 等待几秒钟让配置生效
+                        <br>7. 返回此页面重新尝试登录
+                        <br><br>
+                        <strong>⚠️ 重要：回调地址必须以 login.html 结尾！</strong>
+                        <br>✅ 正确：<code>https://buyuliang.github.io/webnotes-test/login.html</code>
+                        <br>❌ 错误：<code>https://buyuliang.github.io/webnotes-test/index.html</code>
+                        <br><br>
+                        <strong>⚠️ 常见错误：</strong>
+                        <br>• 使用 index.html 而不是 login.html（错误！）
+                        <br>• 地址不匹配（多/少一个斜杠、http vs https、缺少路径等）
+                        <br>• 忘记保存 OAuth App 配置
+                        <br>• 配置未生效（需要等待几秒）
+                    </small>
+                </div>
+                
+                <div class="repo-input-section">
+                    <label for="repoName">仓库名称 (owner/repo):</label>
+                    <input type="text" id="repoName" placeholder="username/repo-name" value="Buyuliang/webnotes-test">
+                    <small>请输入你的 GitHub 仓库名称，格式：username/repo-name</small>
+                </div>
+                
+                <button id="startLoginBtn" class="btn-start-login">使用 OAuth 登录</button>
+                </div>
+            </div>
+            
+            <div id="oauthInfo" class="device-code-section hidden">
+                <h3>正在跳转到 GitHub 授权页面...</h3>
+                <div id="statusMessage" class="status-message info"></div>
+            </div>
+            
+            <div class="warning-box">
+                <strong>⚠️ 重要提示</strong>
+                <p><strong>如果遇到"重定向地址不匹配"错误：</strong></p>
+                <ol style="margin: 10px 0; padding-left: 20px;">
+                    <li>确保 GitHub OAuth App 中的 "Authorization callback URL" 与上面显示的地址<strong>完全一致</strong></li>
+                    <li>包括协议（http/https）、域名、端口号、路径都必须一致</li>
+                    <li>保存 OAuth App 配置后，可能需要等待几秒钟才能生效</li>
+                    <li>如果使用后端服务器，确保后端服务器正在运行</li>
+                </ol>
+                <p style="margin-top: 10px;">
+                    <strong>安全提示：</strong>此方案为快速原型方案，Token 会在浏览器中可见。仅用于演示或内部使用，不建议用于生产环境。
+                </p>
+            </div>
+        </div>
+    </div>
+    
+    <script src="github-auth.js"></script>
+    <script>
+        // 检查是否是 OAuth 回调
+        const urlParams = new URLSearchParams(window.location.search);
+        const code = urlParams.get('code');
+        const state = urlParams.get('state');
+        const error = urlParams.get('error');
+        const token = urlParams.get('token'); // 从后端服务器返回的 token
+        
+        if (error) {
+            // 用户拒绝了授权或其他错误
+            document.getElementById('loginForm').innerHTML = `
+                <div class="status-message error">
+                    <strong>授权失败</strong>
+                    <p>${error === 'access_denied' ? '您取消了授权' : error === 'missing_config' ? '服务器配置缺失' : error === 'server_error' ? '服务器错误' : error}</p>
+                    <button onclick="window.location.href='login.html'" class="btn-start-login" style="margin-top: 15px;">重新登录</button>
+                </div>
+            `;
+        } else if (token && state) {
+            // 从后端服务器获取到 token
+            handleTokenReceived(token, state);
+        } else if (code && state) {
+            // OAuth 回调，尝试直接获取 token（可能会因为 CORS 失败）
+            handleOAuthCallback(code, state);
+        } else {
+            // 显示登录表单
+            initLoginForm();
+        }
+        
+        function handleTokenReceived(token, state) {
+            // 验证 state
+            const savedState = sessionStorage.getItem('oauth_state');
+            if (!savedState || savedState !== state) {
+                document.getElementById('loginForm').innerHTML = `
+                    <div class="status-message error">
+                        <strong>安全验证失败</strong>
+                        <p>State 验证失败，可能存在安全风险</p>
+                        <button onclick="window.location.href='login.html'" class="btn-start-login" style="margin-top: 15px;">重新登录</button>
+                    </div>
+                `;
+                return;
+            }
+            
+            // 获取保存的配置
+            const repoName = sessionStorage.getItem('oauth_repo');
+            
+            // 保存 token
+            localStorage.setItem('github_token', token);
+            localStorage.setItem('github_repo', repoName);
+            
+            // 清除 sessionStorage
+            sessionStorage.removeItem('oauth_state');
+            sessionStorage.removeItem('oauth_repo');
+            sessionStorage.removeItem('oauth_client_id');
+            sessionStorage.removeItem('oauth_redirect_uri');
+            
+            // 显示成功消息并跳转
+            const loginForm = document.getElementById('loginForm');
+            const oauthInfo = document.getElementById('oauthInfo');
+            loginForm.classList.add('hidden');
+            oauthInfo.classList.remove('hidden');
+            showStatus('登录成功！正在跳转...', 'success');
+            
+            setTimeout(() => {
+                window.location.href = 'index.html';
+            }, 1000);
+        }
+        
+        async function handleOAuthCallback(code, state) {
+            const loginForm = document.getElementById('loginForm');
+            const oauthInfo = document.getElementById('oauthInfo');
+            const statusMessageEl = document.getElementById('statusMessage');
+            
+            loginForm.classList.add('hidden');
+            oauthInfo.classList.remove('hidden');
+            showStatus('正在获取访问令牌...', 'info');
+            
+            try {
+                const token = await githubAuth.handleCallback(code, state);
+                
+                // 获取保存的配置
+                const repoName = sessionStorage.getItem('oauth_repo');
+                
+                // 保存 token
+                localStorage.setItem('github_token', token);
+                localStorage.setItem('github_repo', repoName);
+                
+                showStatus('登录成功！正在跳转...', 'success');
+                
+                // 清除 sessionStorage
+                sessionStorage.removeItem('oauth_state');
+                sessionStorage.removeItem('oauth_repo');
+                sessionStorage.removeItem('oauth_client_id');
+                sessionStorage.removeItem('oauth_redirect_uri');
+                
+                // 跳转到主页面
+                setTimeout(() => {
+                    window.location.href = 'index.html';
+                }, 1000);
+            } catch (error) {
+                showStatus(`自动获取 Token 失败: ${error.message}`, 'error');
+                
+                // 提供替代方案
+                setTimeout(() => {
+                    oauthInfo.innerHTML = `
+                        <div class="status-message error">
+                            <strong>自动获取 Token 失败</strong>
+                            <p>${error.message}</p>
+                            <p style="margin-top: 15px;">
+                                <strong>解决方案：</strong>
+                                <br>1. 使用后端服务器处理 OAuth 回调（推荐）
+                                <br>2. 或手动创建 Personal Access Token
+                            </p>
+                            <div style="margin-top: 15px;">
+                                <button onclick="window.location.href='login.html'" class="btn-start-login">返回登录</button>
+                                <a href="https://github.com/settings/tokens/new" target="_blank" class="btn-start-login" style="margin-left: 10px; text-decoration: none; display: inline-block;">创建 Token</a>
+                            </div>
+                        </div>
+                    `;
+                }, 2000);
+            }
+        }
+        
+        function updateRedirectUriDisplay() {
+            const useBackend = document.getElementById('useBackend');
+            if (!useBackend) return;
+            
+            const useBackendChecked = useBackend.checked;
+            const redirectUriDisplay = document.getElementById('redirectUriDisplay');
+            
+            let redirectUri;
+            if (useBackendChecked) {
+                // 使用后端服务器（仅本地开发）
+                redirectUri = 'http://localhost:3000/oauth/callback';
+            } else {
+                // 使用当前页面（适用于 GitHub Pages 和生产环境）
+                // 确保使用完整的 URL，包括协议、域名和路径
+                let currentPath = window.location.pathname;
+                
+                // 确保路径指向 login.html（如果当前不在 login.html，则使用 login.html）
+                if (!currentPath.endsWith('login.html')) {
+                    // 如果当前在 index.html 或其他页面，改为 login.html
+                    const pathParts = currentPath.split('/');
+                    pathParts[pathParts.length - 1] = 'login.html';
+                    currentPath = pathParts.join('/');
+                }
+                
+                redirectUri = window.location.origin + currentPath;
+                
+                // 如果是 GitHub Pages，确保使用 HTTPS
+                if (window.location.hostname.includes('github.io') || window.location.protocol === 'https:') {
+                    redirectUri = redirectUri.replace('http://', 'https://');
+                }
+            }
+            
+            redirectUriDisplay.textContent = redirectUri;
+            redirectUriDisplay.style.color = '#d73502';
+            
+            // 添加复制按钮提示
+            if (redirectUriDisplay.nextElementSibling && redirectUriDisplay.nextElementSibling.classList.contains('copy-hint')) {
+                redirectUriDisplay.nextElementSibling.remove();
+            }
+            const copyHint = document.createElement('small');
+            copyHint.className = 'copy-hint';
+            copyHint.style.display = 'block';
+            copyHint.style.marginTop = '5px';
+            copyHint.style.color = '#666';
+            copyHint.innerHTML = '💡 点击复制地址';
+            redirectUriDisplay.parentNode.insertBefore(copyHint, redirectUriDisplay.nextSibling);
+            
+            // 添加点击复制功能
+            redirectUriDisplay.style.cursor = 'pointer';
+            redirectUriDisplay.title = '点击复制';
+            redirectUriDisplay.onclick = function() {
+                navigator.clipboard.writeText(redirectUri).then(() => {
+                    const originalText = redirectUriDisplay.textContent;
+                    redirectUriDisplay.textContent = '✅ 已复制！';
+                    redirectUriDisplay.style.color = '#27ae60';
+                    setTimeout(() => {
+                        redirectUriDisplay.textContent = originalText;
+                        redirectUriDisplay.style.color = '#d73502';
+                    }, 2000);
+                }).catch(() => {
+                    // 如果复制失败，尝试选中文本
+                    const range = document.createRange();
+                    range.selectNode(redirectUriDisplay);
+                    window.getSelection().removeAllRanges();
+                    window.getSelection().addRange(range);
+                });
+            };
+        }
+        
+        // 切换登录方式
+        function switchLoginMethod() {
+            const useToken = document.getElementById('useToken').checked;
+            const tokenSection = document.getElementById('tokenLoginSection');
+            const oauthSection = document.getElementById('oauthLoginSection');
+            
+            if (useToken) {
+                tokenSection.style.display = 'block';
+                oauthSection.style.display = 'none';
+            } else {
+                tokenSection.style.display = 'none';
+                oauthSection.style.display = 'block';
+            }
+        }
+        
+        // Token 登录
+        async function loginWithToken() {
+            const token = document.getElementById('personalToken').value.trim();
+            const repoName = document.getElementById('repoNameToken').value.trim();
+            
+            if (!token) {
+                showStatus('请输入 Personal Access Token', 'error');
+                return;
+            }
+            
+            if (!repoName) {
+                showStatus('请输入仓库名称', 'error');
+                return;
+            }
+            
+            // 验证仓库名称格式
+            if (!/^[\w\-\.]+\/[\w\-\.]+$/.test(repoName)) {
+                showStatus('仓库名称格式不正确，应为：username/repo-name', 'error');
+                return;
+            }
+            
+            // 验证 token 格式（GitHub token 通常以 ghp_ 开头）
+            if (!token.startsWith('ghp_') && !token.startsWith('github_pat_')) {
+                if (!confirm('Token 格式可能不正确。GitHub Personal Access Token 通常以 "ghp_" 或 "github_pat_" 开头。\n\n是否继续？')) {
+                    return;
+                }
+            }
+            
+            const loginBtn = document.getElementById('loginWithTokenBtn');
+            loginBtn.disabled = true;
+            loginBtn.textContent = '验证 Token...';
+            
+            try {
+                // 验证 token 是否有效
+                const response = await fetch('https://api.github.com/user', {
+                    headers: {
+                        'Authorization': `token ${token}`,
+                        'Accept': 'application/vnd.github.v3+json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        throw new Error('Token 无效或已过期，请检查 Token 是否正确');
+                    }
+                    throw new Error(`验证失败: ${response.status}`);
+                }
+                
+                const userData = await response.json();
+                console.log('登录用户:', userData.login);
+                
+                // 保存配置
+                localStorage.setItem('github_token', token);
+                localStorage.setItem('github_repo', repoName);
+                
+                // 显示成功消息
+                const loginForm = document.getElementById('loginForm');
+                const oauthInfo = document.getElementById('oauthInfo');
+                loginForm.classList.add('hidden');
+                oauthInfo.classList.remove('hidden');
+                showStatus(`登录成功！欢迎 ${userData.login}，正在跳转...`, 'success');
+                
+                // 跳转到主页面
+                setTimeout(() => {
+                    window.location.href = 'index.html';
+                }, 1000);
+                
+            } catch (error) {
+                showStatus(`登录失败: ${error.message}`, 'error');
+                loginBtn.disabled = false;
+                loginBtn.textContent = '使用 Token 登录';
+            }
+        }
+        
+        function initLoginForm() {
+            const startLoginBtn = document.getElementById('startLoginBtn');
+            const loginForm = document.getElementById('loginForm');
+            const repoNameInput = document.getElementById('repoName');
+            const clientIdInput = document.getElementById('clientId');
+            const useBackendCheckbox = document.getElementById('useBackend');
+            
+            // 监听登录方式切换
+            document.getElementById('useToken').addEventListener('change', switchLoginMethod);
+            document.getElementById('useOAuth').addEventListener('change', switchLoginMethod);
+            
+            // Token 登录按钮
+            const loginWithTokenBtn = document.getElementById('loginWithTokenBtn');
+            if (loginWithTokenBtn) {
+                loginWithTokenBtn.addEventListener('click', loginWithToken);
+            }
+            
+            // 从 localStorage 获取保存的 token 和仓库名称（用于 Token 登录）
+            const savedToken = localStorage.getItem('github_token');
+            const savedRepo = localStorage.getItem('github_repo');
+            if (savedToken && savedRepo) {
+                document.getElementById('personalToken').value = savedToken;
+                document.getElementById('repoNameToken').value = savedRepo;
+            } else if (!savedRepo) {
+                // 如果没有保存的仓库名称，使用默认值
+                document.getElementById('repoNameToken').value = 'Buyuliang/webnotes-test';
+            }
+            
+            // 从 URL 参数或 localStorage 获取仓库名称（用于 OAuth 登录）
+            const urlParams = new URLSearchParams(window.location.search);
+            const repoFromUrl = urlParams.get('repo');
+            if (repoFromUrl) {
+                repoNameInput.value = repoFromUrl;
+            } else {
+                const savedRepo = localStorage.getItem('github_repo');
+                if (savedRepo) {
+                    repoNameInput.value = savedRepo;
+                } else {
+                    // 如果没有保存的仓库名称，使用默认值
+                    repoNameInput.value = 'Buyuliang/webnotes-test';
+                }
+            }
+            
+            // 从 localStorage 获取保存的 client_id
+            const savedClientId = localStorage.getItem('github_client_id');
+            if (savedClientId) {
+                clientIdInput.value = savedClientId;
+            }
+            
+            // 从 localStorage 获取是否使用后端
+            const savedUseBackend = localStorage.getItem('use_backend');
+            if (savedUseBackend === 'true') {
+                useBackendCheckbox.checked = true;
+            }
+            
+            // 初始化显示 redirect_uri
+            updateRedirectUriDisplay();
+            
+            // 监听后端服务器选项变化
+            useBackendCheckbox.addEventListener('change', updateRedirectUriDisplay);
+            
+            startLoginBtn.addEventListener('click', () => {
+                const clientId = clientIdInput.value.trim();
+                const repoName = repoNameInput.value.trim();
+                const useBackend = useBackendCheckbox.checked;
+                
+                if (!clientId) {
+                    showStatus('请输入 OAuth App Client ID', 'error');
+                    return;
+                }
+                
+                if (!repoName) {
+                    showStatus('请输入仓库名称', 'error');
+                    return;
+                }
+                
+                // 验证仓库名称格式
+                if (!/^[\w\-\.]+\/[\w\-\.]+$/.test(repoName)) {
+                    showStatus('仓库名称格式不正确，应为：username/repo-name', 'error');
+                    return;
+                }
+                
+                // 确定 redirect_uri
+                let redirectUri;
+                if (useBackend) {
+                    // 使用后端服务器（仅本地开发）
+                    redirectUri = 'http://localhost:3000/oauth/callback';
+                    
+                    // 检查后端服务器是否运行
+                    fetch('http://localhost:3000/oauth/callback?test=1')
+                        .catch(() => {
+                            if (confirm('无法连接到后端服务器 (http://localhost:3000)。\n\n是否继续？如果后端未运行，登录将失败。')) {
+                                proceedWithLogin();
+                            }
+                        });
+                    
+                    function proceedWithLogin() {
+                        // 保存配置
+                        localStorage.setItem('github_repo', repoName);
+                        localStorage.setItem('github_client_id', clientId);
+                        localStorage.setItem('use_backend', useBackend);
+                        
+                        // 启动 OAuth 流程
+                        githubAuth.startOAuthFlow(repoName, clientId, redirectUri);
+                    }
+                    
+                    proceedWithLogin();
+                } else {
+                    // 使用当前页面（适用于 GitHub Pages 和生产环境）
+                    let currentPath = window.location.pathname;
+                    
+                    // 确保路径指向 login.html（如果当前不在 login.html，则使用 login.html）
+                    if (!currentPath.endsWith('login.html')) {
+                        // 如果当前在 index.html 或其他页面，改为 login.html
+                        const pathParts = currentPath.split('/');
+                        pathParts[pathParts.length - 1] = 'login.html';
+                        currentPath = pathParts.join('/');
+                    }
+                    
+                    redirectUri = window.location.origin + currentPath;
+                    
+                    // 如果是 GitHub Pages，确保使用 HTTPS
+                    if (window.location.hostname.includes('github.io') || window.location.protocol === 'https:') {
+                        redirectUri = redirectUri.replace('http://', 'https://');
+                    }
+                    
+                    // 验证 redirect_uri 格式
+                    console.log('使用的回调地址:', redirectUri);
+                    
+                    // 检查用户是否配置了错误的回调地址（index.html）
+                    const wrongCallbackUrl = redirectUri.replace('login.html', 'index.html');
+                    const warningMessage = 
+                        '⚠️ 重要提示：\n\n' +
+                        '回调地址必须是：\n' + redirectUri + '\n\n' +
+                        '❌ 不要使用：' + wrongCallbackUrl + '\n\n' +
+                        '请确认 GitHub OAuth App 中的 "Authorization callback URL" 配置为：\n' + 
+                        redirectUri + '\n\n' +
+                        '（必须以 login.html 结尾，不是 index.html）\n\n' +
+                        '点击"确定"继续登录，或"取消"返回配置。';
+                    
+                    // 保存配置
+                    localStorage.setItem('github_repo', repoName);
+                    localStorage.setItem('github_client_id', clientId);
+                    localStorage.setItem('use_backend', useBackend);
+                    
+                    // 显示确认对话框，确保用户已配置 OAuth App
+                    const confirmed = confirm(warningMessage);
+                    
+                    if (confirmed) {
+                        // 启动 OAuth 流程
+                        githubAuth.startOAuthFlow(repoName, clientId, redirectUri);
+                    }
+                }
+            });
+        }
+        
+        function showStatus(message, type) {
+            const statusMessageEl = document.getElementById('statusMessage');
+            if (statusMessageEl) {
+                statusMessageEl.textContent = message;
+                statusMessageEl.className = `status-message ${type}`;
+                statusMessageEl.classList.remove('hidden');
+            }
+        }
+    </script>
+</body>
+</html>
+

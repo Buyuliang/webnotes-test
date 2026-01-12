@@ -169,6 +169,21 @@ class NotesApp {
             this.loadDirectoryTree();
         });
 
+        // 退出登录
+        const logoutBtn = document.getElementById('logoutBtn');
+        if (logoutBtn) {
+            logoutBtn.addEventListener('click', () => {
+                if (confirm('确定要退出登录吗？')) {
+                    // 清除本地存储的认证信息
+                    localStorage.removeItem('github_token');
+                    localStorage.removeItem('github_repo');
+                    localStorage.removeItem('github_client_id');
+                    // 跳转到登录页面
+                    window.location.href = 'login.html';
+                }
+            });
+        }
+
         // 图片粘贴
         const noteContent = document.getElementById('noteContent');
         noteContent.addEventListener('paste', (e) => {
@@ -2103,13 +2118,37 @@ class NotesApp {
     }
 }
 
+// 检查登录状态
+function checkAuth() {
+    const token = localStorage.getItem('github_token');
+    const repo = localStorage.getItem('github_repo');
+    
+    // 如果未登录，跳转到登录页面
+    if (!token || !repo) {
+        // 保存当前页面路径，登录后可以返回
+        const currentPath = window.location.pathname;
+        if (currentPath !== '/login.html' && !currentPath.endsWith('login.html')) {
+            window.location.href = 'login.html';
+            return false;
+        }
+    }
+    
+    return true;
+}
+
 // 初始化应用（等待 DOM 加载完成）
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
-        const app = new NotesApp();
-        window.app = app; // 方便调试
+        // 检查登录状态
+        if (checkAuth()) {
+            const app = new NotesApp();
+            window.app = app; // 方便调试
+        }
     });
 } else {
-    const app = new NotesApp();
-    window.app = app; // 方便调试
+    // 检查登录状态
+    if (checkAuth()) {
+        const app = new NotesApp();
+        window.app = app; // 方便调试
+    }
 }
