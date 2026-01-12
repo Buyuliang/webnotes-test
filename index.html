@@ -74,6 +74,75 @@
                         </div>
                     </div>
                     <div class="editor-content">
+                        <!-- Markdown 工具栏 -->
+                        <div class="markdown-toolbar">
+                            <div class="toolbar-group">
+                                <button class="toolbar-btn" data-action="heading" data-level="1" title="标题 1">H1</button>
+                                <button class="toolbar-btn" data-action="heading" data-level="2" title="标题 2">H2</button>
+                                <button class="toolbar-btn" data-action="heading" data-level="3" title="标题 3">H3</button>
+                            </div>
+                            <div class="toolbar-separator"></div>
+                            <div class="toolbar-group">
+                                <button class="toolbar-btn" data-action="bold" title="粗体"><strong>B</strong></button>
+                                <button class="toolbar-btn" data-action="italic" title="斜体"><em>I</em></button>
+                                <button class="toolbar-btn" data-action="strikethrough" title="删除线"><s>S</s></button>
+                            </div>
+                            <div class="toolbar-separator"></div>
+                            <div class="toolbar-group">
+                                <button class="toolbar-btn" data-action="code" title="行内代码">&lt;/&gt;</button>
+                                <button class="toolbar-btn" data-action="codeblock" title="代码块">```</button>
+                                <button class="toolbar-btn" data-action="bash" title="Bash 代码块">Bash</button>
+                            </div>
+                            <div class="toolbar-separator"></div>
+                            <div class="toolbar-group">
+                                <button class="toolbar-btn" data-action="link" title="链接">🔗</button>
+                                <button class="toolbar-btn" data-action="image" title="图片">🖼️</button>
+                                <button class="toolbar-btn" data-action="table" title="表格">📊</button>
+                            </div>
+                            <div class="toolbar-separator"></div>
+                            <div class="toolbar-group">
+                                <button class="toolbar-btn" data-action="list" data-type="ul" title="无序列表">• 列表</button>
+                                <button class="toolbar-btn" data-action="list" data-type="ol" title="有序列表">1. 列表</button>
+                                <button class="toolbar-btn" data-action="quote" title="引用">❝</button>
+                            </div>
+                            <div class="toolbar-separator"></div>
+                            <div class="toolbar-group">
+                                <button class="toolbar-btn" data-action="hr" title="分隔线">─</button>
+                                <div class="toolbar-dropdown">
+                                    <button class="toolbar-btn" data-action="color" title="文字颜色">🎨 颜色</button>
+                                    <div class="color-picker" style="display: none;">
+                                        <div class="color-options">
+                                            <span class="color-option" data-color="#000000" style="background: #000000;" title="黑色"></span>
+                                            <span class="color-option" data-color="#ff0000" style="background: #ff0000;" title="红色"></span>
+                                            <span class="color-option" data-color="#00ff00" style="background: #00ff00;" title="绿色"></span>
+                                            <span class="color-option" data-color="#0000ff" style="background: #0000ff;" title="蓝色"></span>
+                                            <span class="color-option" data-color="#ffff00" style="background: #ffff00;" title="黄色"></span>
+                                            <span class="color-option" data-color="#ff00ff" style="background: #ff00ff;" title="紫色"></span>
+                                            <span class="color-option" data-color="#00ffff" style="background: #00ffff;" title="青色"></span>
+                                            <span class="color-option" data-color="#ffa500" style="background: #ffa500;" title="橙色"></span>
+                                            <span class="color-option" data-color="#808080" style="background: #808080;" title="灰色"></span>
+                                            <span class="color-option" data-color="#800000" style="background: #800000;" title="深红"></span>
+                                            <span class="color-option" data-color="#008000" style="background: #008000;" title="深绿"></span>
+                                            <span class="color-option" data-color="#000080" style="background: #000080;" title="深蓝"></span>
+                                        </div>
+                                        <input type="text" class="color-input" placeholder="或输入颜色值 (#ff0000)" style="margin-top: 5px; padding: 5px; width: 100%; border: 1px solid #ddd; border-radius: 3px;">
+                                    </div>
+                                </div>
+                                <div class="toolbar-dropdown">
+                                    <button class="toolbar-btn" data-action="fontsize" title="字体大小">Aa 大小</button>
+                                    <div class="fontsize-picker" style="display: none;">
+                                        <button class="size-option" data-size="12px">12px</button>
+                                        <button class="size-option" data-size="14px">14px</button>
+                                        <button class="size-option" data-size="16px">16px</button>
+                                        <button class="size-option" data-size="18px">18px</button>
+                                        <button class="size-option" data-size="20px">20px</button>
+                                        <button class="size-option" data-size="24px">24px</button>
+                                        <button class="size-option" data-size="32px">32px</button>
+                                        <input type="text" class="size-input" placeholder="或输入自定义大小" style="margin-top: 5px; padding: 5px; width: 100%; border: 1px solid #ddd; border-radius: 3px;">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                         <textarea 
                             id="noteContent" 
                             class="note-content markdown-editor"

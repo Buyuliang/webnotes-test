@@ -184,6 +184,9 @@ class NotesApp {
             });
         }
 
+        // Markdown 工具栏按钮
+        this.setupMarkdownToolbar();
+
         // 图片粘贴
         const noteContent = document.getElementById('noteContent');
         noteContent.addEventListener('paste', (e) => {
@@ -1516,6 +1519,270 @@ class NotesApp {
             // 但会在控制台记录错误，方便调试
         } finally {
             this.syncInProgress = false;
+        }
+    }
+
+    /**
+     * 设置 Markdown 工具栏
+     */
+    setupMarkdownToolbar() {
+        const toolbar = document.querySelector('.markdown-toolbar');
+        if (!toolbar) return;
+
+        // 处理颜色选择器
+        const colorBtn = toolbar.querySelector('[data-action="color"]');
+        if (colorBtn) {
+            const colorPicker = colorBtn.closest('.toolbar-dropdown').querySelector('.color-picker');
+            colorBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isVisible = colorPicker.style.display !== 'none';
+                // 关闭所有其他下拉菜单
+                document.querySelectorAll('.color-picker, .fontsize-picker').forEach(p => {
+                    if (p !== colorPicker) p.style.display = 'none';
+                });
+                colorPicker.style.display = isVisible ? 'none' : 'block';
+            });
+
+            // 颜色选项点击
+            colorPicker.querySelectorAll('.color-option').forEach(option => {
+                option.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const color = option.dataset.color;
+                    this.insertColorOrSize('color', color);
+                    colorPicker.style.display = 'none';
+                });
+            });
+
+            // 颜色输入框
+            const colorInput = colorPicker.querySelector('.color-input');
+            colorInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    const color = colorInput.value.trim();
+                    if (color) {
+                        this.insertColorOrSize('color', color);
+                        colorPicker.style.display = 'none';
+                        colorInput.value = '';
+                    }
+                }
+            });
+        }
+
+        // 处理字体大小选择器
+        const fontSizeBtn = toolbar.querySelector('[data-action="fontsize"]');
+        if (fontSizeBtn) {
+            const fontSizePicker = fontSizeBtn.closest('.toolbar-dropdown').querySelector('.fontsize-picker');
+            fontSizeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isVisible = fontSizePicker.style.display !== 'none';
+                // 关闭所有其他下拉菜单
+                document.querySelectorAll('.color-picker, .fontsize-picker').forEach(p => {
+                    if (p !== fontSizePicker) p.style.display = 'none';
+                });
+                fontSizePicker.style.display = isVisible ? 'none' : 'block';
+            });
+
+            // 字体大小选项点击
+            fontSizePicker.querySelectorAll('.size-option').forEach(option => {
+                option.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const size = option.dataset.size;
+                    this.insertColorOrSize('fontsize', size);
+                    fontSizePicker.style.display = 'none';
+                });
+            });
+
+            // 字体大小输入框
+            const sizeInput = fontSizePicker.querySelector('.size-input');
+            sizeInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    const size = sizeInput.value.trim();
+                    if (size) {
+                        this.insertColorOrSize('fontsize', size);
+                        fontSizePicker.style.display = 'none';
+                        sizeInput.value = '';
+                    }
+                }
+            });
+        }
+
+        // 点击外部关闭下拉菜单
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.toolbar-dropdown')) {
+                document.querySelectorAll('.color-picker, .fontsize-picker').forEach(p => {
+                    p.style.display = 'none';
+                });
+            }
+        });
+
+        // 其他工具栏按钮
+        toolbar.addEventListener('click', (e) => {
+            const btn = e.target.closest('.toolbar-btn');
+            if (!btn || btn.dataset.action === 'color' || btn.dataset.action === 'fontsize') return;
+
+            const action = btn.dataset.action;
+            const level = btn.dataset.level;
+            const type = btn.dataset.type;
+
+            const textarea = document.getElementById('noteContent');
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            const selectedText = textarea.value.substring(start, end);
+            const beforeText = textarea.value.substring(0, start);
+            const afterText = textarea.value.substring(end);
+
+            let insertText = '';
+            let newCursorPos = start;
+
+            switch (action) {
+                case 'heading':
+                    insertText = `${'#'.repeat(parseInt(level))} ${selectedText || '标题'}\n\n`;
+                    newCursorPos = start + insertText.length - (selectedText ? 0 : 3);
+                    break;
+
+                case 'bold':
+                    insertText = `**${selectedText || '粗体文本'}**`;
+                    newCursorPos = start + (selectedText ? insertText.length : 2);
+                    break;
+
+                case 'italic':
+                    insertText = `*${selectedText || '斜体文本'}*`;
+                    newCursorPos = start + (selectedText ? insertText.length : 1);
+                    break;
+
+                case 'strikethrough':
+                    insertText = `~~${selectedText || '删除文本'}~~`;
+                    newCursorPos = start + (selectedText ? insertText.length : 2);
+                    break;
+
+                case 'code':
+                    insertText = `\`${selectedText || '代码'}\``;
+                    newCursorPos = start + (selectedText ? insertText.length : 1);
+                    break;
+
+                case 'codeblock':
+                    const language = prompt('请输入编程语言（可选，直接回车跳过）:', '');
+                    const lang = language ? language.trim() : '';
+                    insertText = `\`\`\`${lang}\n${selectedText || '// 代码块'}\n\`\`\`\n\n`;
+                    newCursorPos = start + insertText.length - (selectedText ? 0 : 8);
+                    break;
+
+                case 'bash':
+                    insertText = `\`\`\`bash\n${selectedText || '# Bash 命令'}\n\`\`\`\n\n`;
+                    newCursorPos = start + insertText.length - (selectedText ? 0 : 13);
+                    break;
+
+                case 'link':
+                    const linkText = selectedText || prompt('链接文本:', '') || '链接文本';
+                    const linkUrl = prompt('链接地址:', 'https://');
+                    if (linkUrl) {
+                        insertText = `[${linkText}](${linkUrl})`;
+                        newCursorPos = start + insertText.length;
+                    } else {
+                        return; // 用户取消
+                    }
+                    break;
+
+                case 'image':
+                    const altText = selectedText || prompt('图片描述:', '') || '图片';
+                    const imageUrl = prompt('图片地址:', 'https://');
+                    if (imageUrl) {
+                        insertText = `![${altText}](${imageUrl})`;
+                        newCursorPos = start + insertText.length;
+                    } else {
+                        return; // 用户取消
+                    }
+                    break;
+
+                case 'table':
+                    const rows = prompt('表格行数（不包括表头）:', '3') || '3';
+                    const cols = prompt('表格列数:', '3') || '3';
+                    const rowCount = parseInt(rows) || 3;
+                    const colCount = parseInt(cols) || 3;
+                    
+                    let table = '|';
+                    for (let i = 0; i < colCount; i++) {
+                        table += ` 列${i + 1} |`;
+                    }
+                    table += '\n|';
+                    for (let i = 0; i < colCount; i++) {
+                        table += ' --- |';
+                    }
+                    for (let r = 0; r < rowCount; r++) {
+                        table += '\n|';
+                        for (let c = 0; c < colCount; c++) {
+                            table += ` 内容 |`;
+                        }
+                    }
+                    table += '\n\n';
+                    insertText = table;
+                    newCursorPos = start + insertText.length;
+                    break;
+
+                case 'list':
+                    if (type === 'ul') {
+                        insertText = `- ${selectedText || '列表项'}\n`;
+                    } else {
+                        insertText = `1. ${selectedText || '列表项'}\n`;
+                    }
+                    newCursorPos = start + insertText.length - 1;
+                    break;
+
+                case 'quote':
+                    insertText = `> ${selectedText || '引用文本'}\n\n`;
+                    newCursorPos = start + insertText.length - (selectedText ? 0 : 4);
+                    break;
+
+                case 'hr':
+                    insertText = '\n---\n\n';
+                    newCursorPos = start + insertText.length - 1;
+                    break;
+
+                case 'color':
+                case 'fontsize':
+                    // 这些由下拉菜单处理
+                    return;
+            }
+
+            // 插入文本
+            textarea.value = beforeText + insertText + afterText;
+            textarea.focus();
+            textarea.setSelectionRange(newCursorPos, newCursorPos);
+
+            // 更新预览
+            if (this.isPreviewMode) {
+                this.updatePreview();
+            }
+        });
+    }
+
+    /**
+     * 插入颜色或字体大小
+     */
+    insertColorOrSize(type, value) {
+        const textarea = document.getElementById('noteContent');
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const selectedText = textarea.value.substring(start, end);
+        const beforeText = textarea.value.substring(0, start);
+        const afterText = textarea.value.substring(end);
+
+        let insertText = '';
+        let newCursorPos = start;
+
+        if (type === 'color') {
+            insertText = `<span style="color: ${value}">${selectedText || '彩色文本'}</span>`;
+            newCursorPos = start + (selectedText ? insertText.length : 33);
+        } else if (type === 'fontsize') {
+            insertText = `<span style="font-size: ${value}">${selectedText || '文本'}</span>`;
+            newCursorPos = start + (selectedText ? insertText.length : 31);
+        }
+
+        textarea.value = beforeText + insertText + afterText;
+        textarea.focus();
+        textarea.setSelectionRange(newCursorPos, newCursorPos);
+
+        if (this.isPreviewMode) {
+            this.updatePreview();
         }
     }
 
