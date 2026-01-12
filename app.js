@@ -189,6 +189,12 @@ class NotesApp {
 
         // 图片粘贴
         const noteContent = document.getElementById('noteContent');
+        
+        // TAB 键功能（类似 VSCode）
+        noteContent.addEventListener('keydown', (e) => {
+            this.handleTabKey(e);
+        });
+        
         noteContent.addEventListener('paste', (e) => {
             this.handleImagePaste(e);
         });
@@ -1567,6 +1573,85 @@ class NotesApp {
             });
         }
 
+        // 处理换行符转换
+        const linebreakBtn = toolbar.querySelector('[data-action="linebreak"]');
+        if (linebreakBtn) {
+            const linebreakPicker = linebreakBtn.closest('.toolbar-dropdown').querySelector('.linebreak-picker');
+            const linebreakStatus = linebreakPicker.querySelector('#linebreakStatus');
+            
+            // 检测当前换行符类型
+            const detectLineBreak = () => {
+                const textarea = document.getElementById('noteContent');
+                const content = textarea.value;
+                
+                let lfCount = 0;
+                let crlfCount = 0;
+                let crCount = 0;
+                
+                for (let i = 0; i < content.length - 1; i++) {
+                    if (content[i] === '\r' && content[i + 1] === '\n') {
+                        crlfCount++;
+                        i++; // 跳过下一个字符
+                    } else if (content[i] === '\n') {
+                        lfCount++;
+                    } else if (content[i] === '\r') {
+                        crCount++;
+                    }
+                }
+                
+                // 检查最后一个字符
+                if (content.length > 0) {
+                    const lastChar = content[content.length - 1];
+                    if (lastChar === '\n' && content[content.length - 2] !== '\r') {
+                        lfCount++;
+                    } else if (lastChar === '\r') {
+                        crCount++;
+                    }
+                }
+                
+                let currentType = '未知';
+                let total = lfCount + crlfCount + crCount;
+                
+                if (total === 0) {
+                    currentType = '无换行符';
+                } else if (crlfCount > lfCount && crlfCount > crCount) {
+                    currentType = 'CRLF (Windows)';
+                } else if (lfCount > crCount) {
+                    currentType = 'LF (Unix/Linux/Mac)';
+                } else if (crCount > 0) {
+                    currentType = 'CR (旧版 Mac)';
+                } else {
+                    currentType = '混合';
+                }
+                
+                linebreakStatus.innerHTML = `
+                    <strong>当前换行符类型：</strong>${currentType}<br>
+                    <small>LF: ${lfCount} | CRLF: ${crlfCount} | CR: ${crCount}</small>
+                `;
+            };
+            
+            linebreakBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                detectLineBreak();
+                const isVisible = linebreakPicker.style.display !== 'none';
+                // 关闭所有其他下拉菜单
+                document.querySelectorAll('.color-picker, .fontsize-picker, .linebreak-picker').forEach(p => {
+                    if (p !== linebreakPicker) p.style.display = 'none';
+                });
+                linebreakPicker.style.display = isVisible ? 'none' : 'block';
+            });
+            
+            // 换行符转换选项
+            linebreakPicker.querySelectorAll('.linebreak-option').forEach(option => {
+                option.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const targetType = option.dataset.type;
+                    this.convertLineBreaks(targetType);
+                    linebreakPicker.style.display = 'none';
+                });
+            });
+        }
+
         // 处理字体大小选择器
         const fontSizeBtn = toolbar.querySelector('[data-action="fontsize"]');
         if (fontSizeBtn) {
@@ -1608,7 +1693,7 @@ class NotesApp {
         // 点击外部关闭下拉菜单
         document.addEventListener('click', (e) => {
             if (!e.target.closest('.toolbar-dropdown')) {
-                document.querySelectorAll('.color-picker, .fontsize-picker').forEach(p => {
+                document.querySelectorAll('.color-picker, .fontsize-picker, .linebreak-picker').forEach(p => {
                     p.style.display = 'none';
                 });
             }
@@ -1617,7 +1702,7 @@ class NotesApp {
         // 其他工具栏按钮
         toolbar.addEventListener('click', (e) => {
             const btn = e.target.closest('.toolbar-btn');
-            if (!btn || btn.dataset.action === 'color' || btn.dataset.action === 'fontsize') return;
+            if (!btn || btn.dataset.action === 'color' || btn.dataset.action === 'fontsize' || btn.dataset.action === 'linebreak') return;
 
             const action = btn.dataset.action;
             const level = btn.dataset.level;
@@ -1753,6 +1838,187 @@ class NotesApp {
                 this.updatePreview();
             }
         });
+    }
+
+    /**
+     * 处理 TAB 键（类似 VSCode 的缩进功能）
+     */
+    handleTabKey(e) {
+        const textarea = e.target;
+        
+        // 只处理 TAB 键
+        if (e.key !== 'Tab') return;
+        
+        e.preventDefault();
+        
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const value = textarea.value;
+        const tabSize = 4; // 使用 4 个空格作为缩进
+        const indent = ' '.repeat(tabSize);
+        const isShiftTab = e.shiftKey;
+        
+        // 获取选中的文本
+        const selectedText = value.substring(start, end);
+        const beforeText = value.substring(0, start);
+        const afterText = value.substring(end);
+        
+        // 检查是否选中了多行（通过检查是否包含换行符）
+        const hasMultipleLines = selectedText.includes('\n');
+        
+        if (hasMultipleLines) {
+            // 多行处理
+            const lines = selectedText.split('\n');
+            const linesBefore = beforeText.split('\n');
+            const firstLineIndex = linesBefore.length - 1;
+            const firstLineStart = beforeText.lastIndexOf('\n') + 1;
+            
+            // 处理每一行
+            const modifiedLines = lines.map((line, index) => {
+                if (isShiftTab) {
+                    // 减少缩进：移除开头的空格（最多移除 tabSize 个）
+                    if (line.startsWith(' ')) {
+                        const leadingSpaces = line.match(/^ */)[0].length;
+                        const spacesToRemove = Math.min(tabSize, leadingSpaces);
+                        return line.substring(spacesToRemove);
+                    }
+                    return line;
+                } else {
+                    // 增加缩进：在行首添加缩进
+                    return indent + line;
+                }
+            });
+            
+            // 重新构建文本
+            const newSelectedText = modifiedLines.join('\n');
+            const newValue = beforeText + newSelectedText + afterText;
+            
+            // 计算新的光标位置
+            let newStart, newEnd;
+            if (isShiftTab) {
+                // 减少缩进：光标位置需要调整
+                const firstLineOriginal = lines[0];
+                const firstLineModified = modifiedLines[0];
+                const firstLineDiff = firstLineOriginal.length - firstLineModified.length;
+                
+                // 计算总减少的字符数
+                let totalRemoved = 0;
+                lines.forEach((line, idx) => {
+                    if (idx === 0) {
+                        totalRemoved += firstLineDiff;
+                    } else {
+                        const original = line;
+                        const modified = modifiedLines[idx];
+                        totalRemoved += (original.length - modified.length);
+                    }
+                });
+                
+                newStart = Math.max(firstLineStart, start - firstLineDiff);
+                newEnd = Math.max(newStart, end - totalRemoved);
+            } else {
+                // 增加缩进：每行都增加了 indent.length 个字符
+                const addedChars = lines.length * indent.length;
+                newStart = start + (firstLineIndex === 0 ? indent.length : 0);
+                newEnd = end + addedChars;
+            }
+            
+            textarea.value = newValue;
+            textarea.setSelectionRange(newStart, newEnd);
+        } else {
+            // 单行处理
+            const lineStart = beforeText.lastIndexOf('\n') + 1;
+            const lineEnd = afterText.indexOf('\n');
+            const lineEndPos = lineEnd === -1 ? value.length : end + lineEnd;
+            const currentLine = value.substring(lineStart, lineEndPos);
+            
+            if (isShiftTab) {
+                // 减少缩进
+                if (currentLine.startsWith(' ')) {
+                    const leadingSpaces = currentLine.match(/^ */)[0].length;
+                    const spacesToRemove = Math.min(tabSize, leadingSpaces);
+                    const newLine = currentLine.substring(spacesToRemove);
+                    const newValue = value.substring(0, lineStart) + newLine + value.substring(lineEndPos);
+                    const newStart = Math.max(lineStart, start - spacesToRemove);
+                    const newEnd = Math.max(newStart, end - spacesToRemove);
+                    
+                    textarea.value = newValue;
+                    textarea.setSelectionRange(newStart, newEnd);
+                }
+            } else {
+                // 增加缩进
+                const newLine = indent + currentLine;
+                const newValue = value.substring(0, lineStart) + newLine + value.substring(lineEndPos);
+                const newStart = start + indent.length;
+                const newEnd = end + indent.length;
+                
+                textarea.value = newValue;
+                textarea.setSelectionRange(newStart, newEnd);
+            }
+        }
+        
+        // 更新预览
+        if (this.isPreviewMode) {
+            this.updatePreview();
+        }
+    }
+
+    /**
+     * 转换换行符
+     */
+    convertLineBreaks(targetType) {
+        const textarea = document.getElementById('noteContent');
+        let content = textarea.value;
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        
+        // 定义目标换行符
+        let targetBreak = '';
+        let targetName = '';
+        switch (targetType) {
+            case 'lf':
+                targetBreak = '\n';
+                targetName = 'LF (Unix/Linux/Mac)';
+                break;
+            case 'crlf':
+                targetBreak = '\r\n';
+                targetName = 'CRLF (Windows)';
+                break;
+            case 'cr':
+                targetBreak = '\r';
+                targetName = 'CR (旧版 Mac)';
+                break;
+            default:
+                return;
+        }
+        
+        // 统一转换为目标换行符
+        // 先处理 CRLF（必须在 LF 和 CR 之前）
+        content = content.replace(/\r\n/g, '\0'); // 临时标记
+        // 处理单独的 CR
+        content = content.replace(/\r/g, '\0');
+        // 处理单独的 LF
+        content = content.replace(/\n/g, '\0');
+        // 替换为目标换行符
+        content = content.replace(/\0/g, targetBreak);
+        
+        // 更新文本
+        textarea.value = content;
+        
+        // 保持光标位置（如果可能）
+        try {
+            textarea.setSelectionRange(start, end);
+        } catch (e) {
+            // 如果位置无效，将光标移到末尾
+            textarea.setSelectionRange(content.length, content.length);
+        }
+        
+        // 显示成功消息
+        this.showMessage(`已转换为 ${targetName} 换行符`, 'success');
+        
+        // 更新预览
+        if (this.isPreviewMode) {
+            this.updatePreview();
+        }
     }
 
     /**

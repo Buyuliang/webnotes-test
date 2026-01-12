@@ -109,6 +109,17 @@
                             <div class="toolbar-group">
                                 <button class="toolbar-btn" data-action="hr" title="分隔线">─</button>
                                 <div class="toolbar-dropdown">
+                                    <button class="toolbar-btn" data-action="linebreak" title="换行符转换">↩️ 换行符</button>
+                                    <div class="linebreak-picker" style="display: none;">
+                                        <div class="linebreak-info" style="margin-bottom: 10px; padding: 8px; background: #f0f7ff; border-radius: 4px; font-size: 12px;">
+                                            <div id="linebreakStatus">检测中...</div>
+                                        </div>
+                                        <button class="linebreak-option" data-type="lf" style="width: 100%; margin-bottom: 5px;">转换为 LF (Unix/Linux/Mac)</button>
+                                        <button class="linebreak-option" data-type="crlf" style="width: 100%; margin-bottom: 5px;">转换为 CRLF (Windows)</button>
+                                        <button class="linebreak-option" data-type="cr" style="width: 100%;">转换为 CR (旧版 Mac)</button>
+                                    </div>
+                                </div>
+                                <div class="toolbar-dropdown">
                                     <button class="toolbar-btn" data-action="color" title="文字颜色">🎨 颜色</button>
                                     <div class="color-picker" style="display: none;">
                                         <div class="color-options">
