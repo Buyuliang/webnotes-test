@@ -692,12 +692,20 @@ header h1 {
 }
 
 .markdown-preview pre code {
-    display: inline;
+    display: block;
     padding: 0;
     margin: 0;
     overflow: visible;
     background-color: transparent;
     border: 0;
+}
+
+.markdown-preview pre {
+    position: relative;
+}
+
+.markdown-preview pre:hover .copy-code-btn {
+    opacity: 1 !important;
 }
 
 .markdown-preview blockquote {

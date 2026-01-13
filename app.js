@@ -1747,13 +1747,13 @@ class NotesApp {
                 case 'codeblock':
                     const language = prompt('请输入编程语言（可选，直接回车跳过）:', '');
                     const lang = language ? language.trim() : '';
-                    insertText = `\`\`\`${lang}\n${selectedText || '// 代码块'}\n\`\`\`\n\n`;
-                    newCursorPos = start + insertText.length - (selectedText ? 0 : 8);
+                    insertText = `\`\`\`${lang}\n${selectedText || ''}\n\`\`\`\n\n`;
+                    newCursorPos = start + insertText.length - (selectedText ? 0 : 4); // 光标定位到代码块内部
                     break;
 
                 case 'bash':
-                    insertText = `\`\`\`bash\n${selectedText || '# Bash 命令'}\n\`\`\`\n\n`;
-                    newCursorPos = start + insertText.length - (selectedText ? 0 : 13);
+                    insertText = `\`\`\`bash\n${selectedText || ''}\n\`\`\`\n\n`;
+                    newCursorPos = start + insertText.length - (selectedText ? 0 : 4); // 光标定位到代码块内部
                     break;
 
                 case 'link':
@@ -2085,10 +2085,126 @@ class NotesApp {
         if (typeof marked !== 'undefined') {
             // 使用 marked.js 渲染 Markdown
             preview.innerHTML = marked.parse(content);
+            
+            // 为代码块添加复制功能
+            this.addCopyButtonToCodeBlocks(preview);
         } else {
             // 如果没有 marked.js，显示原始文本
             preview.textContent = content;
         }
+    }
+
+    /**
+     * 为预览中的代码块添加复制按钮
+     */
+    addCopyButtonToCodeBlocks(preview) {
+        // 查找所有代码块（pre 元素）
+        const preElements = preview.querySelectorAll('pre');
+        
+        preElements.forEach((preElement) => {
+            // 检查是否已经添加了复制按钮
+            if (preElement.querySelector('.copy-code-btn')) {
+                return;
+            }
+            
+            // 获取代码内容
+            const codeElement = preElement.querySelector('code');
+            const codeText = codeElement ? (codeElement.textContent || codeElement.innerText) : (preElement.textContent || preElement.innerText);
+            
+            // 创建复制按钮
+            const copyBtn = document.createElement('button');
+            copyBtn.className = 'copy-code-btn';
+            copyBtn.innerHTML = '📋 复制';
+            copyBtn.title = '复制代码';
+            
+            // 设置按钮样式
+            copyBtn.style.cssText = `
+                position: absolute;
+                top: 8px;
+                right: 8px;
+                padding: 6px 12px;
+                background: #667eea;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 12px;
+                opacity: 0.7;
+                transition: all 0.2s;
+                z-index: 10;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            `;
+            
+            // 鼠标悬停效果
+            copyBtn.addEventListener('mouseenter', () => {
+                copyBtn.style.opacity = '1';
+                copyBtn.style.transform = 'translateY(-2px)';
+                copyBtn.style.boxShadow = '0 2px 8px rgba(102, 126, 234, 0.4)';
+            });
+            
+            copyBtn.addEventListener('mouseleave', () => {
+                copyBtn.style.opacity = '0.7';
+                copyBtn.style.transform = 'translateY(0)';
+                copyBtn.style.boxShadow = 'none';
+            });
+            
+            // 复制功能
+            copyBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                
+                try {
+                    await navigator.clipboard.writeText(codeText);
+                    
+                    // 显示成功提示
+                    const originalText = copyBtn.innerHTML;
+                    const originalBg = copyBtn.style.background;
+                    copyBtn.innerHTML = '✅ 已复制';
+                    copyBtn.style.background = '#27ae60';
+                    
+                    setTimeout(() => {
+                        copyBtn.innerHTML = originalText;
+                        copyBtn.style.background = originalBg;
+                    }, 2000);
+                } catch (err) {
+                    // 降级方案：使用传统方法
+                    const textArea = document.createElement('textarea');
+                    textArea.value = codeText;
+                    textArea.style.position = 'fixed';
+                    textArea.style.left = '-9999px';
+                    textArea.style.opacity = '0';
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    
+                    try {
+                        const successful = document.execCommand('copy');
+                        if (successful) {
+                            copyBtn.innerHTML = '✅ 已复制';
+                            copyBtn.style.background = '#27ae60';
+                            setTimeout(() => {
+                                copyBtn.innerHTML = '📋 复制';
+                                copyBtn.style.background = '#667eea';
+                            }, 2000);
+                        } else {
+                            throw new Error('复制失败');
+                        }
+                    } catch (err) {
+                        copyBtn.innerHTML = '❌ 失败';
+                        copyBtn.style.background = '#e74c3c';
+                        setTimeout(() => {
+                            copyBtn.innerHTML = '📋 复制';
+                            copyBtn.style.background = '#667eea';
+                        }, 2000);
+                    }
+                    
+                    document.body.removeChild(textArea);
+                }
+            });
+            
+            // 将代码块容器设置为相对定位
+            preElement.style.position = 'relative';
+            preElement.appendChild(copyBtn);
+        });
     }
 
     /**
