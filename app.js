@@ -20,6 +20,21 @@ class NotesApp {
      */
     async init() {
         try {
+            // 0. 检查目录树是否已显示（可能在应用初始化前已显示）
+            const container = document.getElementById('directoryTree') || document.getElementById('notesList');
+            const treeAlreadyShown = container && container.querySelector('[data-path="root"]');
+            
+            // 如果目录树未显示，立即显示
+            if (!treeAlreadyShown) {
+                const rootTree = [{
+                    type: 'dir',
+                    name: 'root',
+                    path: 'root',
+                    children: []
+                }];
+                this.renderDirectoryTree(rootTree);
+            }
+
             // 1. 加载配置（可能失败：DOM 未加载、localStorage 不可用）
             try {
                 this.loadConfig();
@@ -28,25 +43,7 @@ class NotesApp {
                 // 继续执行，不影响其他功能
             }
 
-            // 2. 加载笔记（可能失败：网络错误、GitHub API 错误）
-            try {
-                await this.loadNotes();
-            } catch (error) {
-                console.error('加载笔记失败:', error);
-                // 使用空数组，确保应用可以继续运行
-                this.notes = [];
-                // 尝试从本地存储加载
-                try {
-                    const saved = localStorage.getItem('notes');
-                    if (saved) {
-                        this.notes = JSON.parse(saved);
-                    }
-                } catch (e) {
-                    console.warn('从本地存储加载失败:', e);
-                }
-            }
-
-            // 3. 设置事件监听器（可能失败：DOM 元素不存在）
+            // 2. 设置事件监听器（可能失败：DOM 元素不存在）
             try {
                 this.setupEventListeners();
             } catch (error) {
@@ -55,38 +52,53 @@ class NotesApp {
                 this.showMessage('部分功能初始化失败，请刷新页面重试', 'error');
             }
 
-            // 4. 延迟渲染，确保 DOM 已加载
-            setTimeout(() => {
-                try {
-                    // 尝试渲染笔记列表
-                    const hasRendered = this.renderNotesList();
-                    
-                    // 如果配置了 GitHub，尝试加载目录树
-                    if (githubAPI.isConfigured()) {
-                        this.loadDirectoryTree().catch((error) => {
-                            console.warn('加载目录树失败:', error);
-                            // 如果目录树加载失败，显示空的 root 目录
-                            const rootTree = [{
-                                type: 'dir',
-                                name: 'root',
-                                path: 'root',
-                                children: []
-                            }];
-                            this.renderDirectoryTree(rootTree);
-                        });
+            // 3. 异步加载笔记和目录树数据（不阻塞界面显示）
+            // 使用 Promise.all 并行加载，提高速度
+            Promise.all([
+                // 加载笔记（可能失败：网络错误、GitHub API 错误）
+                (async () => {
+                    try {
+                        await this.loadNotes();
+                    } catch (error) {
+                        console.error('加载笔记失败:', error);
+                        // 使用空数组，确保应用可以继续运行
+                        this.notes = [];
+                        // 尝试从本地存储加载
+                        try {
+                            const saved = localStorage.getItem('notes');
+                            if (saved) {
+                                this.notes = JSON.parse(saved);
+                            }
+                        } catch (e) {
+                            console.warn('从本地存储加载失败:', e);
+                        }
                     }
-                } catch (error) {
-                    console.error('渲染失败:', error);
-                    // 显示空的 root 目录，而不是错误提示
-                    const rootTree = [{
-                        type: 'dir',
-                        name: 'root',
-                        path: 'root',
-                        children: []
-                    }];
-                    this.renderDirectoryTree(rootTree);
-                }
-            }, 100);
+                })(),
+                // 加载目录树数据（异步，不阻塞）
+                (async () => {
+                    // 确保容器存在后再加载
+                    const container = document.getElementById('directoryTree') || document.getElementById('notesList');
+                    if (!container) {
+                        // 如果容器不存在，等待一下再试
+                        await new Promise(resolve => setTimeout(resolve, 10));
+                    }
+                    
+                    try {
+                        // 如果配置了 GitHub，加载目录树数据
+                        if (githubAPI.isConfigured()) {
+                            await this.loadDirectoryTree(false);
+                        } else {
+                            // 未配置 GitHub，尝试渲染笔记列表
+                            this.renderNotesList();
+                        }
+                    } catch (error) {
+                        console.warn('加载目录树失败:', error);
+                        // 如果目录树加载失败，保持显示空的 root 目录（已经显示了）
+                    }
+                })()
+            ]).catch(error => {
+                console.error('初始化数据加载失败:', error);
+            });
 
             // 5. 启动自动同步（可能失败：但不应阻止应用运行）
             try {
@@ -2308,30 +2320,47 @@ class NotesApp {
             return;
         }
 
+        // 标记是否正在加载，避免重复加载
+        if (this._loadingTree) {
+            return;
+        }
+        this._loadingTree = true;
+
         try {
             // 如果强制刷新，先清空容器
             if (forceRefresh) {
                 const container = document.getElementById('directoryTree') || document.getElementById('notesList');
                 if (container) {
                     container.innerHTML = '';
+                    // 立即显示空的 root 目录
+                    const emptyRootTree = [{
+                        type: 'dir',
+                        name: 'root',
+                        path: 'root',
+                        children: []
+                    }];
+                    this.renderDirectoryTree(emptyRootTree);
+                }
+            } else {
+                // 非强制刷新时，确保至少显示 root 目录（如果还没有显示）
+                const container = document.getElementById('directoryTree') || document.getElementById('notesList');
+                if (container && !container.querySelector('[data-path="root"]')) {
+                    const emptyRootTree = [{
+                        type: 'dir',
+                        name: 'root',
+                        path: 'root',
+                        children: []
+                    }];
+                    this.renderDirectoryTree(emptyRootTree);
                 }
             }
-
-            // 先快速显示 root 目录（即使为空），不等待任何操作
-            const emptyRootTree = [{
-                type: 'dir',
-                name: 'root',
-                path: 'root',
-                children: []
-            }];
-            this.renderDirectoryTree(emptyRootTree);
 
             // 异步检查并创建 root 目录（不阻塞显示）
             githubAPI.createDirectory('root').catch(error => {
                 // 目录可能已存在，忽略错误
             });
 
-            // 从 GitHub 重新获取目录结构
+            // 从 GitHub 获取目录结构
             // 如果是强制刷新，绕过缓存获取最新数据
             let tree = [];
             try {
@@ -2359,18 +2388,35 @@ class NotesApp {
                 children: Array.isArray(filteredTree) ? filteredTree : []
             }];
             
-            // 渲染目录结构（使用文件名作为标题）
-            this.renderDirectoryTree(rootTree);
+            // 只在非强制刷新时渲染（强制刷新时已经渲染了空目录）
+            if (!forceRefresh) {
+                // 渲染目录结构（使用文件名作为标题）
+                this.renderDirectoryTree(rootTree);
+            } else {
+                // 强制刷新时，更新现有目录树（增量更新）
+                this.updateDirectoryTree(rootTree);
+            }
             
             // 然后异步加载文件标题并更新显示（不阻塞初始显示）
-            // 如果是强制刷新，也加载标题并绕过缓存
-            if (forceRefresh) {
-                await this.loadDirectoryTreeTitles(true);
-            } else {
-                this.loadDirectoryTreeTitles(false);
+            // 使用防抖，避免频繁更新
+            if (this._titleLoadTimeout) {
+                clearTimeout(this._titleLoadTimeout);
             }
+            this._titleLoadTimeout = setTimeout(() => {
+                if (forceRefresh) {
+                    this.loadDirectoryTreeTitles(true).finally(() => {
+                        this._loadingTree = false;
+                    });
+                } else {
+                    this.loadDirectoryTreeTitles(false).finally(() => {
+                        this._loadingTree = false;
+                    });
+                }
+            }, 300); // 延迟300ms加载标题，避免立即刷新
+            
         } catch (error) {
-            console.warn('加载目录树失败，显示空的 root 目录:', error);
+            console.warn('加载目录树失败:', error);
+            this._loadingTree = false;
             // 即使出错，也显示 root 目录（空目录）
             const rootTree = [{
                 type: 'dir',
@@ -2396,15 +2442,7 @@ class NotesApp {
             
             // 确保 tree 是数组
             if (!Array.isArray(tree)) {
-                // 如果获取失败，确保至少显示 root 目录
-                const rootTree = [{
-                    type: 'dir',
-                    name: 'root',
-                    path: 'root',
-                    children: []
-                }];
-                this.renderDirectoryTree(rootTree);
-                return;
+                return; // 如果获取失败，保持现有显示
             }
             
             // 过滤掉 files 和 images 目录
@@ -2419,18 +2457,93 @@ class NotesApp {
                 children: Array.isArray(filteredTree) ? filteredTree : []
             }];
             
-            // 更新目录树显示（使用真实标题）
-            this.renderDirectoryTree(rootTree);
+            // 增量更新标题（只更新文件名显示，不重新渲染整个树）
+            this.updateDirectoryTreeTitles(rootTree);
         } catch (error) {
             console.warn('加载目录树标题失败:', error);
-            // 失败不影响使用，确保至少显示 root 目录
-            const rootTree = [{
-                type: 'dir',
-                name: 'root',
-                path: 'root',
-                children: []
-            }];
-            this.renderDirectoryTree(rootTree);
+            // 失败不影响使用，保持现有显示
+        }
+    }
+
+    /**
+     * 增量更新目录树标题（只更新文件名显示，不重新渲染整个树）
+     */
+    updateDirectoryTreeTitles(tree) {
+        const container = document.getElementById('directoryTree') || document.getElementById('notesList');
+        if (!container) return;
+
+        // 递归更新标题
+        const updateItemTitle = (item, element) => {
+            if (!element) return;
+            
+            const nameSpan = element.querySelector('.tree-item-name');
+            if (nameSpan && item.type === 'file' && item.name.endsWith('.md') && item.title) {
+                // 只有当标题不同时才更新，避免闪烁
+                if (nameSpan.textContent !== item.title) {
+                    nameSpan.textContent = item.title;
+                    nameSpan.setAttribute('title', `${item.title} (${item.name})`);
+                }
+            }
+            
+            // 递归处理子项
+            if (item.children && item.children.length > 0) {
+                const childrenDiv = element.nextElementSibling;
+                if (childrenDiv && childrenDiv.classList.contains('tree-children')) {
+                    const childElements = childrenDiv.querySelectorAll('.tree-item');
+                    item.children.forEach((child, index) => {
+                        if (index < childElements.length) {
+                            updateItemTitle(child, childElements[index]);
+                        }
+                    });
+                }
+            }
+        };
+
+        // 更新根目录
+        const rootElement = container.querySelector('[data-path="root"]');
+        if (rootElement && tree.length > 0) {
+            updateItemTitle(tree[0], rootElement);
+        }
+    }
+
+    /**
+     * 更新目录树（增量更新，避免完全重新渲染）
+     */
+    updateDirectoryTree(newTree) {
+        const container = document.getElementById('directoryTree') || document.getElementById('notesList');
+        if (!container) return;
+
+        // 检查当前树结构是否相同（只比较路径）
+        const currentItems = Array.from(container.querySelectorAll('.tree-item')).map(el => ({
+            path: el.getAttribute('data-path'),
+            type: el.getAttribute('data-type')
+        }));
+
+        const newItems = [];
+        const collectItems = (tree, parentPath = '') => {
+            tree.forEach(item => {
+                newItems.push({ path: item.path, type: item.type });
+                if (item.children && item.children.length > 0) {
+                    collectItems(item.children, item.path);
+                }
+            });
+        };
+        collectItems(newTree);
+
+        // 如果结构相同，只更新标题；否则完全重新渲染
+        const structureChanged = currentItems.length !== newItems.length ||
+            currentItems.some((item, index) => 
+                !newItems[index] || 
+                item.path !== newItems[index].path || 
+                item.type !== newItems[index].type
+            );
+
+        if (structureChanged) {
+            // 结构改变，需要重新渲染
+            this.renderDirectoryTree(newTree);
+        } else {
+            // 结构相同，只更新标题
+            this.updateDirectoryTreeTitles(newTree);
         }
     }
 
@@ -2874,6 +2987,70 @@ function checkAuth() {
     }
     
     return true;
+}
+
+// 立即显示目录树框架（在应用初始化之前）
+function showInitialTree() {
+    const container = document.getElementById('directoryTree') || document.getElementById('notesList');
+    if (container && container.innerHTML.trim() === '') {
+        const rootTree = [{
+            type: 'dir',
+            name: 'root',
+            path: 'root',
+            children: []
+        }];
+        // 创建临时渲染函数
+        const tempRender = (tree, cont = container, level = 0) => {
+            if (level === 0) {
+                cont.innerHTML = '';
+            }
+            tree.forEach(item => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = `tree-item ${item.type === 'dir' ? 'tree-item-folder' : 'tree-item-file'}`;
+                itemDiv.style.paddingLeft = `${level * 20}px`;
+                itemDiv.setAttribute('data-path', item.path);
+                itemDiv.setAttribute('data-type', item.type);
+                
+                const iconSpan = document.createElement('span');
+                iconSpan.className = `tree-item-icon ${item.type === 'dir' ? 'icon-folder' : 'icon-file'}`;
+                if (item.type === 'dir') {
+                    const expandIcon = document.createElement('span');
+                    expandIcon.className = 'tree-expand-icon';
+                    expandIcon.textContent = ' ';
+                    iconSpan.appendChild(expandIcon);
+                    const folderIcon = document.createElement('span');
+                    folderIcon.textContent = '📁';
+                    iconSpan.appendChild(folderIcon);
+                } else {
+                    iconSpan.textContent = '📄';
+                }
+                
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'tree-item-name';
+                nameSpan.textContent = item.name;
+                
+                itemDiv.appendChild(iconSpan);
+                itemDiv.appendChild(nameSpan);
+                cont.appendChild(itemDiv);
+                
+                if (item.children && item.children.length > 0) {
+                    const childrenDiv = document.createElement('div');
+                    childrenDiv.className = 'tree-children hidden';
+                    cont.appendChild(childrenDiv);
+                    tempRender(item.children, childrenDiv, level + 1);
+                }
+            });
+        };
+        tempRender(rootTree);
+    }
+}
+
+// 立即尝试显示目录树（如果 DOM 已准备好）
+if (document.readyState !== 'loading') {
+    showInitialTree();
+} else {
+    // 如果 DOM 还在加载，在 DOMContentLoaded 时立即显示
+    document.addEventListener('DOMContentLoaded', showInitialTree, { once: true });
 }
 
 // 初始化应用（等待 DOM 加载完成）
