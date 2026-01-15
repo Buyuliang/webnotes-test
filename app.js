@@ -12,6 +12,8 @@ class NotesApp {
         this.isPreviewMode = false;
         this.autoSyncInterval = null;
         this.syncInProgress = false;
+        this.noteCache = new Map(); // 笔记缓存，key 为文件路径或 'new_note'
+        this.hasUnsavedChanges = false; // 是否有未保存的修改
         this.init();
     }
 
@@ -20,7 +22,20 @@ class NotesApp {
      */
     async init() {
         try {
-            // 0. 检查目录树是否已显示（可能在应用初始化前已显示）
+            // 0. 从 localStorage 恢复笔记缓存
+            try {
+                const cacheDataStr = localStorage.getItem('note_cache');
+                if (cacheDataStr) {
+                    const cacheData = JSON.parse(cacheDataStr);
+                    Object.entries(cacheData).forEach(([key, value]) => {
+                        this.noteCache.set(key, value);
+                    });
+                }
+            } catch (e) {
+                console.warn('恢复笔记缓存失败:', e);
+            }
+            
+            // 0.1. 检查目录树是否已显示（可能在应用初始化前已显示）
             const container = document.getElementById('directoryTree') || document.getElementById('notesList');
             const treeAlreadyShown = container && container.querySelector('[data-path="root"]');
             
@@ -57,22 +72,22 @@ class NotesApp {
             Promise.all([
                 // 加载笔记（可能失败：网络错误、GitHub API 错误）
                 (async () => {
-                    try {
-                        await this.loadNotes();
-                    } catch (error) {
-                        console.error('加载笔记失败:', error);
-                        // 使用空数组，确保应用可以继续运行
-                        this.notes = [];
-                        // 尝试从本地存储加载
-                        try {
-                            const saved = localStorage.getItem('notes');
-                            if (saved) {
-                                this.notes = JSON.parse(saved);
-                            }
-                        } catch (e) {
-                            console.warn('从本地存储加载失败:', e);
-                        }
+            try {
+                await this.loadNotes();
+            } catch (error) {
+                console.error('加载笔记失败:', error);
+                // 使用空数组，确保应用可以继续运行
+                this.notes = [];
+                // 尝试从本地存储加载
+                try {
+                    const saved = localStorage.getItem('notes');
+                    if (saved) {
+                        this.notes = JSON.parse(saved);
                     }
+                } catch (e) {
+                    console.warn('从本地存储加载失败:', e);
+                }
+            }
                 })(),
                 // 加载目录树数据（异步，不阻塞）
                 (async () => {
@@ -85,13 +100,13 @@ class NotesApp {
                     
                     try {
                         // 如果配置了 GitHub，加载目录树数据
-                        if (githubAPI.isConfigured()) {
+                    if (githubAPI.isConfigured()) {
                             await this.loadDirectoryTree(false);
                         } else {
                             // 未配置 GitHub，尝试渲染笔记列表
                             this.renderNotesList();
-                        }
-                    } catch (error) {
+                    }
+                } catch (error) {
                         console.warn('加载目录树失败:', error);
                         // 如果目录树加载失败，保持显示空的 root 目录（已经显示了）
                     }
@@ -238,24 +253,27 @@ class NotesApp {
 
         // 自动保存到本地（防抖）
         let saveTimeout;
-        noteContent.addEventListener('input', () => {
+        const autoSaveHandler = () => {
             // 实时更新预览
             if (this.isPreviewMode) {
                 this.updatePreview();
             }
             
+            // 标记有未保存的修改
+            this.hasUnsavedChanges = true;
+            this.updateUnsavedIndicator();
+            
+            // 保存到缓存
+            this.saveCurrentNoteToCache();
+            
             clearTimeout(saveTimeout);
             saveTimeout = setTimeout(() => {
                 this.autoSaveLocal();
             }, 1000);
-        });
-
-        document.getElementById('noteTitle').addEventListener('input', () => {
-            clearTimeout(saveTimeout);
-            saveTimeout = setTimeout(() => {
-                this.autoSaveLocal();
-            }, 1000);
-        });
+        };
+        
+        noteContent.addEventListener('input', autoSaveHandler);
+        document.getElementById('noteTitle').addEventListener('input', autoSaveHandler);
 
         // 新建笔记对话框按钮
         document.getElementById('cancelNoteBtn').addEventListener('click', () => {
@@ -375,15 +393,37 @@ class NotesApp {
      * 创建新笔记（仅在本地缓存，不提交到 GitHub）
      */
     createNewNote() {
+        // 在创建新笔记前，先保存当前笔记到缓存
+        if (this.currentNotePath || this.currentNoteId) {
+            this.saveCurrentNoteToCache();
+        }
+        
+        // 检查是否有未保存的修改
+        if (this.hasUnsavedChangesInCurrentNote()) {
+            const shouldContinue = confirm('当前笔记有未保存的修改，是否继续创建新笔记？\n\n未保存的内容已自动缓存，稍后可以恢复。');
+            if (!shouldContinue) {
+                return;
+            }
+        }
+        
+        // 尝试从缓存恢复新笔记
+        const cached = this.restoreNoteFromCache('new_note');
+        
         // 新建笔记只在本地缓存，不提交到 GitHub
         // 设置 currentNotePath 为 null，表示这是新笔记，还未保存
         this.currentNotePath = null;
         this.currentNoteId = null;
         
         // 更新 UI
+        if (cached) {
+            document.getElementById('noteTitle').value = cached.title;
+            document.getElementById('noteContent').value = cached.content;
+            document.getElementById('notePath').textContent = '路径: 未保存（新笔记，已缓存）';
+        } else {
         document.getElementById('noteTitle').value = '未命名笔记';
         document.getElementById('noteContent').value = '# 未命名笔记\n\n';
         document.getElementById('notePath').textContent = '路径: 未保存（新笔记）';
+        }
         
         document.getElementById('emptyState').classList.add('hidden');
         document.getElementById('editorContainer').classList.remove('hidden');
@@ -588,7 +628,24 @@ class NotesApp {
                 document.getElementById('noteContent').value = contentToSave;
             }
             
+            // 保存成功后，清除缓存中的该笔记（因为已保存到服务器）
+            if (this.currentNotePath) {
+                this.noteCache.delete(this.currentNotePath);
+                // 更新 localStorage
+                try {
+                    const cacheData = {};
+                    this.noteCache.forEach((value, key) => {
+                        cacheData[key] = value;
+                    });
+                    localStorage.setItem('note_cache', JSON.stringify(cacheData));
+                } catch (e) {
+                    console.warn('更新缓存失败:', e);
+                }
+            }
+            
             this.updateLastSaved(new Date().toISOString());
+            this.hasUnsavedChanges = false;
+            this.updateUnsavedIndicator();
             this.showMessage('笔记已保存', 'success');
             
             // 等待一小段时间，确保 GitHub API 的更改已生效
@@ -610,6 +667,9 @@ class NotesApp {
      * 自动保存到本地（快速保存）
      */
     async autoSaveLocal() {
+        // 保存到缓存
+        this.saveCurrentNoteToCache();
+        
         if (!this.currentNoteId) return;
 
         const note = this.notes.find(n => n.id === this.currentNoteId);
@@ -626,6 +686,25 @@ class NotesApp {
         // 更新预览
         if (this.isPreviewMode) {
             this.updatePreview();
+        }
+    }
+
+    /**
+     * 更新未保存标识
+     */
+    updateUnsavedIndicator() {
+        const lastSavedEl = document.getElementById('lastSaved');
+        if (!lastSavedEl) return;
+        
+        if (this.hasUnsavedChanges) {
+            lastSavedEl.textContent = '未保存 *';
+            lastSavedEl.style.color = '#e74c3c';
+            lastSavedEl.style.fontWeight = 'bold';
+        } else {
+            const date = new Date();
+            lastSavedEl.textContent = `最后保存: ${date.toLocaleString('zh-CN')}`;
+            lastSavedEl.style.color = '#888';
+            lastSavedEl.style.fontWeight = 'normal';
         }
     }
 
@@ -1363,9 +1442,20 @@ class NotesApp {
      * 更新最后保存时间
      */
     updateLastSaved(dateString) {
+        const lastSavedEl = document.getElementById('lastSaved');
+        if (!lastSavedEl) return;
+        
+        if (dateString) {
         const date = new Date(dateString);
-        document.getElementById('lastSaved').textContent = 
-            `最后保存: ${date.toLocaleString('zh-CN')}`;
+            lastSavedEl.textContent = `最后保存: ${date.toLocaleString('zh-CN')}`;
+            lastSavedEl.style.color = '#888';
+            lastSavedEl.style.fontWeight = 'normal';
+            this.hasUnsavedChanges = false;
+        } else {
+            lastSavedEl.textContent = '未保存';
+            lastSavedEl.style.color = '#888';
+            lastSavedEl.style.fontWeight = 'normal';
+        }
     }
 
     /**
@@ -1478,7 +1568,18 @@ class NotesApp {
 
         // 页面关闭前同步（避免重复绑定）
         if (!this.beforeUnloadHandler) {
-            this.beforeUnloadHandler = () => {
+            this.beforeUnloadHandler = (e) => {
+                // 保存当前笔记到缓存
+                this.saveCurrentNoteToCache();
+                
+                // 检查是否有未保存的修改
+                if (this.hasUnsavedChangesInCurrentNote()) {
+                    // 显示浏览器默认的退出提示
+                    e.preventDefault();
+                    e.returnValue = '您有未保存的修改，确定要离开吗？';
+                    return e.returnValue;
+                }
+                
                 if (githubAPI.isConfigured() && !this.syncInProgress) {
                     // 同步保存当前笔记到本地
                     if (this.currentNoteId) {
@@ -2345,13 +2446,13 @@ class NotesApp {
                 // 非强制刷新时，确保至少显示 root 目录（如果还没有显示）
                 const container = document.getElementById('directoryTree') || document.getElementById('notesList');
                 if (container && !container.querySelector('[data-path="root"]')) {
-                    const emptyRootTree = [{
-                        type: 'dir',
-                        name: 'root',
-                        path: 'root',
-                        children: []
-                    }];
-                    this.renderDirectoryTree(emptyRootTree);
+            const emptyRootTree = [{
+                type: 'dir',
+                name: 'root',
+                path: 'root',
+                children: []
+            }];
+            this.renderDirectoryTree(emptyRootTree);
                 }
             }
 
@@ -2390,8 +2491,8 @@ class NotesApp {
             
             // 只在非强制刷新时渲染（强制刷新时已经渲染了空目录）
             if (!forceRefresh) {
-                // 渲染目录结构（使用文件名作为标题）
-                this.renderDirectoryTree(rootTree);
+            // 渲染目录结构（使用文件名作为标题）
+            this.renderDirectoryTree(rootTree);
             } else {
                 // 强制刷新时，更新现有目录树（增量更新）
                 this.updateDirectoryTree(rootTree);
@@ -2403,15 +2504,15 @@ class NotesApp {
                 clearTimeout(this._titleLoadTimeout);
             }
             this._titleLoadTimeout = setTimeout(() => {
-                if (forceRefresh) {
+            if (forceRefresh) {
                     this.loadDirectoryTreeTitles(true).finally(() => {
                         this._loadingTree = false;
                     });
-                } else {
+            } else {
                     this.loadDirectoryTreeTitles(false).finally(() => {
                         this._loadingTree = false;
                     });
-                }
+            }
             }, 300); // 延迟300ms加载标题，避免立即刷新
             
         } catch (error) {
@@ -2721,11 +2822,128 @@ class NotesApp {
     }
 
     /**
+     * 保存当前笔记到缓存
+     */
+    saveCurrentNoteToCache() {
+        const title = document.getElementById('noteTitle')?.value || '';
+        const content = document.getElementById('noteContent')?.value || '';
+        
+        if (!title && !content) {
+            return; // 空内容不缓存
+        }
+        
+        const cacheKey = this.currentNotePath || 'new_note';
+        this.noteCache.set(cacheKey, {
+            title: title,
+            content: content,
+            path: this.currentNotePath,
+            timestamp: Date.now()
+        });
+        
+        // 保存到 localStorage（持久化）
+        try {
+            const cacheData = {};
+            this.noteCache.forEach((value, key) => {
+                cacheData[key] = value;
+            });
+            localStorage.setItem('note_cache', JSON.stringify(cacheData));
+        } catch (e) {
+            console.warn('保存缓存到 localStorage 失败:', e);
+        }
+    }
+
+    /**
+     * 从缓存恢复笔记
+     */
+    restoreNoteFromCache(filePath) {
+        const cacheKey = filePath || 'new_note';
+        const cached = this.noteCache.get(cacheKey);
+        
+        if (cached) {
+            return cached;
+        }
+        
+        // 尝试从 localStorage 恢复
+        try {
+            const cacheDataStr = localStorage.getItem('note_cache');
+            if (cacheDataStr) {
+                const cacheData = JSON.parse(cacheDataStr);
+                if (cacheData[cacheKey]) {
+                    this.noteCache.set(cacheKey, cacheData[cacheKey]);
+                    return cacheData[cacheKey];
+                }
+            }
+        } catch (e) {
+            console.warn('从 localStorage 恢复缓存失败:', e);
+        }
+        
+        return null;
+    }
+
+    /**
+     * 检查是否有未保存的修改
+     */
+    hasUnsavedChangesInCurrentNote() {
+        if (!this.currentNotePath && !this.currentNoteId) {
+            // 新笔记，检查是否有内容
+            const title = document.getElementById('noteTitle')?.value || '';
+            const content = document.getElementById('noteContent')?.value || '';
+            return title.trim() !== '' || content.trim() !== '# 未命名笔记\n\n';
+        }
+        
+        // 已存在的笔记，检查是否与缓存或原始内容不同
+        const title = document.getElementById('noteTitle')?.value || '';
+        const content = document.getElementById('noteContent')?.value || '';
+        
+        const cached = this.restoreNoteFromCache(this.currentNotePath);
+        if (cached) {
+            return cached.title !== title || cached.content !== content;
+        }
+        
+        // 如果没有缓存，认为有修改（保守策略）
+        return true;
+    }
+
+    /**
      * 打开笔记文件
      */
     async openNoteFile(filePath) {
+        // 在打开新笔记前，先保存当前笔记到缓存
+        if (this.currentNotePath || this.currentNoteId) {
+            this.saveCurrentNoteToCache();
+        }
+        
+        // 检查是否有未保存的修改
+        if (this.hasUnsavedChangesInCurrentNote()) {
+            const shouldContinue = confirm('当前笔记有未保存的修改，是否继续打开新笔记？\n\n未保存的内容已自动缓存，稍后可以恢复。');
+            if (!shouldContinue) {
+                return;
+            }
+        }
+        
         if (!githubAPI.isConfigured()) {
             this.showMessage('请先配置 GitHub Token 和仓库', 'error');
+            return;
+        }
+
+        // 先尝试从缓存恢复
+        const cached = this.restoreNoteFromCache(filePath);
+        if (cached) {
+            // 从缓存恢复
+            this.currentNotePath = filePath;
+            this.currentNoteId = filePath;
+            document.getElementById('noteTitle').value = cached.title;
+            document.getElementById('noteContent').value = cached.content;
+            document.getElementById('notePath').textContent = `路径: ${filePath} (已缓存)`;
+            document.getElementById('emptyState').classList.add('hidden');
+            document.getElementById('editorContainer').classList.remove('hidden');
+            
+            if (this.isPreviewMode) {
+                this.updatePreview();
+            }
+            
+            // 在后台加载最新内容
+            this.loadNoteFileInBackground(filePath);
             return;
         }
 
@@ -2755,6 +2973,9 @@ class NotesApp {
             document.getElementById('emptyState').classList.add('hidden');
             document.getElementById('editorContainer').classList.remove('hidden');
 
+            // 保存到缓存
+            this.saveCurrentNoteToCache();
+
             if (this.isPreviewMode) {
                 this.updatePreview();
             }
@@ -2762,6 +2983,53 @@ class NotesApp {
             this.showMessage(`打开文件失败: ${error.message}`, 'error');
         } finally {
             this.showLoading(false);
+        }
+    }
+
+    /**
+     * 在后台加载笔记文件（用于更新缓存）
+     */
+    async loadNoteFileInBackground(filePath) {
+        try {
+            const fileData = await githubAPI.readNoteFile(filePath);
+            if (fileData) {
+                // 检查缓存内容是否与服务器内容不同
+                const cached = this.restoreNoteFromCache(filePath);
+                if (cached && cached.content !== fileData.content) {
+                    // 内容不同，提示用户
+                    const useCached = confirm('检测到服务器上的文件已更新，是否使用缓存的内容？\n\n点击"确定"使用缓存内容，点击"取消"使用服务器最新内容。');
+                    if (!useCached) {
+                        // 使用服务器内容
+                        let title = fileData.name.replace(/\.md$/, '');
+                        const firstLine = fileData.content.trim().split('\n')[0];
+                        if (firstLine.startsWith('#')) {
+                            title = firstLine.replace(/^#+\s*/, '').trim();
+                        }
+                        document.getElementById('noteTitle').value = title;
+                        document.getElementById('noteContent').value = fileData.content;
+                        this.saveCurrentNoteToCache();
+                        if (this.isPreviewMode) {
+                            this.updatePreview();
+                        }
+                    }
+                } else if (!cached) {
+                    // 没有缓存，直接更新
+                    let title = fileData.name.replace(/\.md$/, '');
+                    const firstLine = fileData.content.trim().split('\n')[0];
+                    if (firstLine.startsWith('#')) {
+                        title = firstLine.replace(/^#+\s*/, '').trim();
+                    }
+                    document.getElementById('noteTitle').value = title;
+                    document.getElementById('noteContent').value = fileData.content;
+                    this.saveCurrentNoteToCache();
+                    document.getElementById('notePath').textContent = `路径: ${filePath}`;
+                    if (this.isPreviewMode) {
+                        this.updatePreview();
+                    }
+                }
+            }
+        } catch (error) {
+            console.warn('后台加载文件失败:', error);
         }
     }
 
@@ -3058,14 +3326,14 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
         // 检查登录状态
         if (checkAuth()) {
-            const app = new NotesApp();
-            window.app = app; // 方便调试
+        const app = new NotesApp();
+        window.app = app; // 方便调试
         }
     });
 } else {
     // 检查登录状态
     if (checkAuth()) {
-        const app = new NotesApp();
-        window.app = app; // 方便调试
+    const app = new NotesApp();
+    window.app = app; // 方便调试
     }
 }
