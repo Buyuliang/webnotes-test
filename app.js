@@ -1720,40 +1720,90 @@ class NotesApp {
 
             switch (action) {
                 case 'heading':
-                    insertText = `${'#'.repeat(parseInt(level))} ${selectedText || '标题'}\n\n`;
-                    newCursorPos = start + insertText.length - (selectedText ? 0 : 3);
+                    if (selectedText) {
+                        // 有选中文本：将选中文本转换为标题，光标定位到标题文本末尾
+                        const headingPrefix = '#'.repeat(parseInt(level)) + ' ';
+                        insertText = `${headingPrefix}${selectedText}\n\n`;
+                        newCursorPos = start + headingPrefix.length + selectedText.length;
+                    } else {
+                        // 无选中文本：插入标题模板，光标定位到"标题"文本中间
+                        insertText = `${'#'.repeat(parseInt(level))} 标题\n\n`;
+                        newCursorPos = start + '#'.repeat(parseInt(level)).length + 2; // 定位到"标题"前
+                    }
                     break;
 
                 case 'bold':
-                    insertText = `**${selectedText || '粗体文本'}**`;
-                    newCursorPos = start + (selectedText ? insertText.length : 2);
+                    if (selectedText) {
+                        // 有选中文本：添加粗体标记，光标定位到文本末尾
+                        insertText = `**${selectedText}**`;
+                        newCursorPos = start + 2 + selectedText.length;
+                    } else {
+                        // 无选中文本：插入粗体模板，光标定位到文本中间
+                        insertText = `**粗体文本**`;
+                        newCursorPos = start + 2; // 定位到"粗体文本"前
+                    }
                     break;
 
                 case 'italic':
-                    insertText = `*${selectedText || '斜体文本'}*`;
-                    newCursorPos = start + (selectedText ? insertText.length : 1);
+                    if (selectedText) {
+                        // 有选中文本：添加斜体标记，光标定位到文本末尾
+                        insertText = `*${selectedText}*`;
+                        newCursorPos = start + 1 + selectedText.length;
+                    } else {
+                        // 无选中文本：插入斜体模板，光标定位到文本中间
+                        insertText = `*斜体文本*`;
+                        newCursorPos = start + 1; // 定位到"斜体文本"前
+                    }
                     break;
 
                 case 'strikethrough':
-                    insertText = `~~${selectedText || '删除文本'}~~`;
-                    newCursorPos = start + (selectedText ? insertText.length : 2);
+                    if (selectedText) {
+                        // 有选中文本：添加删除线标记，光标定位到文本末尾
+                        insertText = `~~${selectedText}~~`;
+                        newCursorPos = start + 2 + selectedText.length;
+                    } else {
+                        // 无选中文本：插入删除线模板，光标定位到文本中间
+                        insertText = `~~删除文本~~`;
+                        newCursorPos = start + 2; // 定位到"删除文本"前
+                    }
                     break;
 
                 case 'code':
-                    insertText = `\`${selectedText || '代码'}\``;
-                    newCursorPos = start + (selectedText ? insertText.length : 1);
+                    if (selectedText) {
+                        // 有选中文本：添加代码标记，光标定位到文本末尾
+                        insertText = `\`${selectedText}\``;
+                        newCursorPos = start + 1 + selectedText.length;
+                    } else {
+                        // 无选中文本：插入代码模板，光标定位到文本中间
+                        insertText = `\`代码\``;
+                        newCursorPos = start + 1; // 定位到"代码"前
+                    }
                     break;
 
                 case 'codeblock':
                     const language = prompt('请输入编程语言（可选，直接回车跳过）:', '');
                     const lang = language ? language.trim() : '';
-                    insertText = `\`\`\`${lang}\n${selectedText || ''}\n\`\`\`\n\n`;
-                    newCursorPos = start + insertText.length - (selectedText ? 0 : 4); // 光标定位到代码块内部
+                    if (selectedText) {
+                        // 有选中文本：将文本放入代码块，光标定位到代码块末尾（在结束标记前）
+                        insertText = `\`\`\`${lang}\n${selectedText}\n\`\`\`\n\n`;
+                        newCursorPos = start + `\`\`\`${lang}\n`.length + selectedText.length;
+                    } else {
+                        // 无选中文本：插入空代码块，光标定位到代码块内部
+                        insertText = `\`\`\`${lang}\n\n\`\`\`\n\n`;
+                        newCursorPos = start + `\`\`\`${lang}\n`.length; // 定位到代码块内部（第一行）
+                    }
                     break;
 
                 case 'bash':
-                    insertText = `\`\`\`bash\n${selectedText || ''}\n\`\`\`\n\n`;
-                    newCursorPos = start + insertText.length - (selectedText ? 0 : 4); // 光标定位到代码块内部
+                    if (selectedText) {
+                        // 有选中文本：将文本放入 bash 代码块，光标定位到代码块末尾（在结束标记前）
+                        insertText = `\`\`\`bash\n${selectedText}\n\`\`\`\n\n`;
+                        newCursorPos = start + '```bash\n'.length + selectedText.length;
+                    } else {
+                        // 无选中文本：插入空 bash 代码块，光标定位到代码块内部
+                        insertText = `\`\`\`bash\n\n\`\`\`\n\n`;
+                        newCursorPos = start + '```bash\n'.length; // 定位到代码块内部（第一行）
+                    }
                     break;
 
                 case 'link':
@@ -1804,22 +1854,42 @@ class NotesApp {
                     break;
 
                 case 'list':
-                    if (type === 'ul') {
-                        insertText = `- ${selectedText || '列表项'}\n`;
+                    if (selectedText) {
+                        // 有选中文本：转换为列表项，光标定位到文本末尾
+                        if (type === 'ul') {
+                            insertText = `- ${selectedText}\n`;
+                            newCursorPos = start + 2 + selectedText.length;
+                        } else {
+                            insertText = `1. ${selectedText}\n`;
+                            newCursorPos = start + 3 + selectedText.length;
+                        }
                     } else {
-                        insertText = `1. ${selectedText || '列表项'}\n`;
+                        // 无选中文本：插入列表模板，光标定位到文本中间
+                        if (type === 'ul') {
+                            insertText = `- 列表项\n`;
+                            newCursorPos = start + 2; // 定位到"列表项"前
+                        } else {
+                            insertText = `1. 列表项\n`;
+                            newCursorPos = start + 3; // 定位到"列表项"前
+                        }
                     }
-                    newCursorPos = start + insertText.length - 1;
                     break;
 
                 case 'quote':
-                    insertText = `> ${selectedText || '引用文本'}\n\n`;
-                    newCursorPos = start + insertText.length - (selectedText ? 0 : 4);
+                    if (selectedText) {
+                        // 有选中文本：转换为引用，光标定位到文本末尾
+                        insertText = `> ${selectedText}\n\n`;
+                        newCursorPos = start + 2 + selectedText.length;
+                    } else {
+                        // 无选中文本：插入引用模板，光标定位到文本中间
+                        insertText = `> 引用文本\n\n`;
+                        newCursorPos = start + 2; // 定位到"引用文本"前
+                    }
                     break;
 
                 case 'hr':
                     insertText = '\n---\n\n';
-                    newCursorPos = start + insertText.length - 1;
+                    newCursorPos = start + 1; // 定位到分隔线后
                     break;
 
                 case 'color':
@@ -1830,8 +1900,29 @@ class NotesApp {
 
             // 插入文本
             textarea.value = beforeText + insertText + afterText;
+            
+            // 确保光标位置在有效范围内
+            const maxPos = textarea.value.length;
+            newCursorPos = Math.min(Math.max(0, newCursorPos), maxPos);
+            
+            // 设置焦点和光标位置
             textarea.focus();
             textarea.setSelectionRange(newCursorPos, newCursorPos);
+            
+            // 滚动到光标位置（确保光标可见）
+            try {
+                // 计算光标所在行
+                const textBeforeCursor = textarea.value.substring(0, newCursorPos);
+                const linesBeforeCursor = textBeforeCursor.split('\n').length;
+                const lineHeight = parseInt(window.getComputedStyle(textarea).lineHeight) || 20;
+                
+                // 滚动到光标位置（保留3行可见区域）
+                const scrollTo = Math.max(0, (linesBeforeCursor - 3) * lineHeight);
+                textarea.scrollTop = scrollTo;
+            } catch (e) {
+                // 如果滚动失败，至少确保焦点在文本框
+                textarea.scrollTop = 0;
+            }
 
             // 更新预览
             if (this.isPreviewMode) {
