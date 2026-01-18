@@ -40,6 +40,13 @@ pip install onnx==1.14.1 \
             onnxruntime==1.14.1 \
             -i https://pypi.tuna.tsinghua.edu.cn/simple
 
+echo "==== 安装 ffmpeg（系统 + Python） ===="
+conda install -y -c conda-forge ffmpeg
+pip install ffmpeg-python -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+pip install soundfile \
+  -i https://pypi.tuna.tsinghua.edu.cn/simple
+
 echo "==== 安装辅助依赖 ===="
 pip install packaging six typing_extensions -i https://pypi.tuna.tsinghua.edu.cn/simple
 
