@@ -22,7 +22,10 @@ class NotesApp {
      */
     async init() {
         try {
-            // 0. 从 localStorage 恢复笔记缓存
+            // 0. 初始化主题（必须在其他初始化之前，确保样式正确应用）
+            this.initTheme();
+            
+            // 0.1. 从 localStorage 恢复笔记缓存
             try {
                 const cacheDataStr = localStorage.getItem('note_cache');
                 if (cacheDataStr) {
@@ -35,7 +38,7 @@ class NotesApp {
                 console.warn('恢复笔记缓存失败:', e);
             }
             
-            // 0.1. 检查目录树是否已显示（可能在应用初始化前已显示）
+            // 0.2. 检查目录树是否已显示（可能在应用初始化前已显示）
             const container = document.getElementById('directoryTree') || document.getElementById('notesList');
             const treeAlreadyShown = container && container.querySelector('[data-path="root"]');
             
@@ -136,6 +139,14 @@ class NotesApp {
      * 设置事件监听器
      */
     setupEventListeners() {
+        // 主题切换按钮
+        const themeToggleBtn = document.getElementById('themeToggleBtn');
+        if (themeToggleBtn) {
+            themeToggleBtn.addEventListener('click', () => {
+                this.toggleTheme();
+            });
+        }
+
         // 配置按钮
         document.getElementById('configBtn').addEventListener('click', () => {
             this.toggleConfigPanel();
@@ -356,6 +367,44 @@ class NotesApp {
     toggleConfigPanel() {
         const panel = document.getElementById('configPanel');
         panel.classList.toggle('hidden');
+    }
+
+    /**
+     * 初始化主题
+     */
+    initTheme() {
+        const savedTheme = localStorage.getItem('theme') || 'dark';
+        this.applyTheme(savedTheme);
+    }
+
+    /**
+     * 应用主题
+     */
+    applyTheme(theme) {
+        const html = document.documentElement;
+        if (theme === 'dark') {
+            html.setAttribute('data-theme', 'dark');
+        } else {
+            html.removeAttribute('data-theme');
+        }
+        
+        // 更新按钮文本
+        const themeToggleBtn = document.getElementById('themeToggleBtn');
+        if (themeToggleBtn) {
+            themeToggleBtn.textContent = theme === 'dark' ? '☀️ 明亮' : '🌙 暗黑';
+        }
+        
+        // 保存主题设置
+        localStorage.setItem('theme', theme);
+    }
+
+    /**
+     * 切换主题
+     */
+    toggleTheme() {
+        const currentTheme = localStorage.getItem('theme') || 'light';
+        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        this.applyTheme(newTheme);
     }
 
     /**
