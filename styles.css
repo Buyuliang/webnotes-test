@@ -1040,6 +1040,155 @@ header h1 {
     margin-top: 20px;
 }
 
+/* 全屏模式样式 */
+body.fullscreen-active {
+    overflow: hidden;
+}
+
+.editor-container.fullscreen-mode {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 9999;
+    background: white;
+    border-radius: 0;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.editor-container.fullscreen-mode .editor-header {
+    padding: 15px 20px;
+    border-bottom: 1px solid #e0e0e0;
+    flex-shrink: 0;
+}
+
+.editor-container.fullscreen-mode .editor-content {
+    flex: 1;
+    overflow: hidden;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.editor-container.fullscreen-mode .markdown-toolbar {
+    flex-shrink: 0;
+}
+
+.editor-container.fullscreen-mode .note-content,
+.editor-container.fullscreen-mode .markdown-preview {
+    flex: 1;
+    padding: 40px;
+    overflow-y: auto;
+    font-size: 16px;
+    line-height: 1.8;
+}
+
+.editor-container.fullscreen-mode .markdown-preview {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 60px 40px;
+}
+
+.editor-container.fullscreen-mode .editor-footer {
+    flex-shrink: 0;
+    padding: 12px 20px;
+    border-top: 1px solid #e0e0e0;
+}
+
+/* 全屏模式下的预览优化 */
+.editor-container.fullscreen-mode .markdown-preview {
+    background: #fafafa;
+}
+
+.editor-container.fullscreen-mode .markdown-preview h1,
+.editor-container.fullscreen-mode .markdown-preview h2,
+.editor-container.fullscreen-mode .markdown-preview h3 {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+/* 全屏模式样式 */
+body.fullscreen-active {
+    overflow: hidden;
+}
+
+.editor-container.fullscreen-mode {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 9999;
+    background: var(--bg-editor);
+    border-radius: 0;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.editor-container.fullscreen-mode .editor-header {
+    padding: 15px 20px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+    background: var(--bg-editor);
+}
+
+.editor-container.fullscreen-mode .editor-content {
+    flex: 1;
+    overflow: hidden;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.editor-container.fullscreen-mode .markdown-toolbar {
+    flex-shrink: 0;
+}
+
+.editor-container.fullscreen-mode .note-content,
+.editor-container.fullscreen-mode .markdown-preview {
+    flex: 1;
+    padding: 40px;
+    overflow-y: auto;
+    font-size: 16px;
+    line-height: 1.8;
+}
+
+.editor-container.fullscreen-mode .markdown-preview {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 60px 40px;
+    background: var(--bg-editor);
+}
+
+.editor-container.fullscreen-mode .editor-footer {
+    flex-shrink: 0;
+    padding: 12px 20px;
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-editor);
+}
+
+/* 全屏模式下的预览优化 */
+.editor-container.fullscreen-mode .markdown-preview {
+    background: var(--bg-editor);
+}
+
+.editor-container.fullscreen-mode .markdown-preview h1,
+.editor-container.fullscreen-mode .markdown-preview h2,
+.editor-container.fullscreen-mode .markdown-preview h3 {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
 /* 响应式设计 */
 @media (max-width: 768px) {
     .main-content {
@@ -1059,5 +1208,15 @@ header h1 {
     .dialog-content {
         min-width: 90%;
         margin: 20px;
+    }
+    
+    .editor-container.fullscreen-mode .note-content,
+    .editor-container.fullscreen-mode .markdown-preview {
+        padding: 20px;
+        font-size: 14px;
+    }
+    
+    .editor-container.fullscreen-mode .markdown-preview {
+        padding: 30px 20px;
     }
 }

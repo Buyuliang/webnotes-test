@@ -167,6 +167,11 @@ class NotesApp {
             this.togglePreviewMode();
         });
 
+        // 全屏模式
+        document.getElementById('fullscreenBtn').addEventListener('click', () => {
+            this.toggleFullscreen();
+        });
+
         // 新建笔记
         document.getElementById('newNoteBtn').addEventListener('click', () => {
             this.createNewNote();
@@ -2325,6 +2330,78 @@ class NotesApp {
             editor.classList.remove('hidden');
             preview.classList.add('hidden');
             viewBtn.textContent = '👁️ 预览';
+        }
+    }
+
+    /**
+     * 切换全屏模式
+     */
+    toggleFullscreen() {
+        const editorContainer = document.getElementById('editorContainer');
+        const fullscreenBtn = document.getElementById('fullscreenBtn');
+        
+        if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.mozFullScreenElement && !document.msFullscreenElement) {
+            // 进入全屏
+            if (editorContainer.requestFullscreen) {
+                editorContainer.requestFullscreen();
+            } else if (editorContainer.webkitRequestFullscreen) {
+                editorContainer.webkitRequestFullscreen();
+            } else if (editorContainer.mozRequestFullScreen) {
+                editorContainer.mozRequestFullScreen();
+            } else if (editorContainer.msRequestFullscreen) {
+                editorContainer.msRequestFullscreen();
+            }
+        } else {
+            // 退出全屏
+            if (document.exitFullscreen) {
+                document.exitFullscreen();
+            } else if (document.webkitExitFullscreen) {
+                document.webkitExitFullscreen();
+            } else if (document.mozCancelFullScreen) {
+                document.mozCancelFullScreen();
+            } else if (document.msExitFullscreen) {
+                document.msExitFullscreen();
+            }
+        }
+    }
+
+    /**
+     * 处理全屏状态变化
+     */
+    handleFullscreenChange() {
+        const editorContainer = document.getElementById('editorContainer');
+        const fullscreenBtn = document.getElementById('fullscreenBtn');
+        const isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+        
+        if (isFullscreen) {
+            // 全屏时隐藏侧边栏和头部
+            document.querySelector('.sidebar')?.classList.add('hidden');
+            document.querySelector('header')?.classList.add('hidden');
+            document.querySelector('.config-panel')?.classList.add('hidden');
+            
+            // 更新按钮文本
+            if (fullscreenBtn) {
+                fullscreenBtn.textContent = '⛶ 退出全屏';
+                fullscreenBtn.title = '退出全屏';
+            }
+            
+            // 添加全屏样式类
+            editorContainer?.classList.add('fullscreen-mode');
+            document.body.classList.add('fullscreen-active');
+        } else {
+            // 恢复侧边栏和头部
+            document.querySelector('.sidebar')?.classList.remove('hidden');
+            document.querySelector('header')?.classList.remove('hidden');
+            
+            // 更新按钮文本
+            if (fullscreenBtn) {
+                fullscreenBtn.textContent = '⛶ 全屏';
+                fullscreenBtn.title = '全屏模式';
+            }
+            
+            // 移除全屏样式类
+            editorContainer?.classList.remove('fullscreen-mode');
+            document.body.classList.remove('fullscreen-active');
         }
     }
 
