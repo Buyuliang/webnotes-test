@@ -107,6 +107,14 @@ journalctl -u load-test.service -f
 sudo systemctl stop load-test.service
 ```
 
+### 查看 CPU GPU 负载
+
+
+```bash
+htop
+cat /sys/class/devfreq/fb000000.gpu/load
+```
+
 
 
 
