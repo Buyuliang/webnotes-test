@@ -2413,9 +2413,51 @@ class NotesApp {
         const preview = document.getElementById('markdownPreview');
         
         if (typeof marked !== 'undefined') {
-            // 使用 marked.js 渲染 Markdown
-            preview.innerHTML = marked.parse(content);
-            
+            // 抽取所有数学块为占位符，避免 marked 修改 TeX 的反斜线或换行
+            const mathBlocks = [];
+            let idx = 0;
+            const mathRegex = /\$\$[\s\S]+?\$\$|\$[\s\S]+?\$/g;
+            const contentWithPlaceholders = content.replace(mathRegex, (match) => {
+                const key = `@@MATH${idx}@@`;
+                mathBlocks.push({key, text: match});
+                idx += 1;
+                return key;
+            });
+
+            // 使用 marked 渲染含占位符的内容
+            preview.innerHTML = marked.parse(contentWithPlaceholders);
+
+            // 将占位符替换回原始 TeX 文本（作为文本/HTML 片段），以便 auto-render 能识别
+            try {
+                mathBlocks.forEach(({key, text}) => {
+                    // 直接替换字符串中的占位符为原始 TeX（包含 $ 或 $$）
+                    preview.innerHTML = preview.innerHTML.split(key).join(text);
+                });
+
+                // 使用 KaTeX auto-render 渲染替换后的 DOM
+                if (typeof renderMathInElement !== 'undefined') {
+                    renderMathInElement(preview, {
+                        delimiters: [
+                            {left: '$$', right: '$$', display: true},
+                            {left: '$', right: '$', display: false}
+                        ],
+                        throwOnError: false
+                    });
+                } else if (typeof katex !== 'undefined') {
+                    // 回退：没有 auto-render 时，尽量用 katex 渲染所有 $$...$$ 和 $...$
+                    let html = preview.innerHTML;
+                    html = html.replace(/\$\$([\s\S]+?)\$\$/g, (m, expr) => {
+                        try { return katex.renderToString(expr, {displayMode: true, throwOnError: false}); } catch (e) { return m; }
+                    });
+                    html = html.replace(/\$([\s\S]+?)\$/g, (m, expr) => {
+                        try { return katex.renderToString(expr, {displayMode: false, throwOnError: false}); } catch (e) { return m; }
+                    });
+                    preview.innerHTML = html;
+                }
+            } catch (e) {
+                console.warn('数学渲染出错:', e);
+            }
+
             // 为代码块添加复制功能
             this.addCopyButtonToCodeBlocks(preview);
         } else {
