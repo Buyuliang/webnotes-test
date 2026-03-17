@@ -5,5 +5,8 @@ https://mailporary.com/zh
 ```
 
 ```bash
-周三 dijwez66la@anogz.com  abcdefabcdef
+密码：abcdefabcdef
+周三：
+dijwez66la@anogz.com  
+usermmu1xwdgrjwz@anogz.com
 ```
